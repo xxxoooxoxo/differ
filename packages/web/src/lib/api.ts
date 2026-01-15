@@ -208,7 +208,8 @@ export async function getRemoteInfo(): Promise<RemoteInfo | null> {
   } else {
     const res = await fetch('/api/branches/remote')
     if (!res.ok) return null
-    return res.json()
+    const data = await res.json()
+    return data.remote
   }
 }
 
