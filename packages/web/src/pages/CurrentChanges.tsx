@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useGitDiff } from '../hooks/useGitDiff'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useVimNavigation } from '../hooks/useVimNavigation'
@@ -14,9 +14,26 @@ export function CurrentChanges() {
   const { data, loading, error, refetch } = useGitDiff()
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [diffStyle, setDiffStyle] = useState<DiffStyle>('split')
+  const [showFilterBar, setShowFilterBar] = useState(true)
 
   const { isConnected } = useWebSocket(refetch)
   const { openInEditor } = useEditor()
+
+  // Toggle filter bar with 'f' key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target as HTMLElement
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+          return
+        }
+        e.preventDefault()
+        setShowFilterBar((prev) => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const contentRef = useRef<HTMLElement>(null)
   const diffListRef = useRef<VirtualizedDiffListHandle>(null)
@@ -37,11 +54,7 @@ export function CurrentChanges() {
 
   const { focusedIndex } = useVimNavigation({
     files,
-    isExpanded: (path) => diffListRef.current?.isExpanded(path) ?? false,
-    onToggleExpanded: (path, expanded) => diffListRef.current?.toggleFile(path, expanded),
-    onExpandAll: () => diffListRef.current?.expandAll(),
-    onCollapseAll: () => diffListRef.current?.collapseAll(),
-    scrollToIndex: (index) => diffListRef.current?.scrollToIndex(index),
+    diffListRef,
     scrollContainerRef: contentRef,
     openInEditor,
   })
@@ -86,7 +99,7 @@ export function CurrentChanges() {
         title="Files"
         loading={loading}
       />
-      <SidebarInset>
+      <SidebarInset className="h-svh overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
@@ -97,21 +110,8 @@ export function CurrentChanges() {
             onDiffStyleChange={setDiffStyle}
           />
         </header>
-        <main className="flex-1 overflow-y-auto bg-secondary/30" ref={contentRef}>
-          <div className="p-4">
-            {!loading && allFiles.length > 0 && (
-              <DiffToolbar
-                filters={filters}
-                setFilters={setFilters}
-                resetFilters={resetFilters}
-                toggleExtension={toggleExtension}
-                toggleStatus={toggleStatus}
-                hasActiveFilters={hasActiveFilters}
-                availableExtensions={availableExtensions}
-                totalCount={allFiles.length}
-                filteredCount={files.length}
-              />
-            )}
+        <main className="flex-1 min-h-0 overflow-y-auto bg-secondary/30" ref={contentRef}>
+          <div className="p-4 pb-20">
             {loading ? (
               <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
                 Loading...
@@ -127,6 +127,20 @@ export function CurrentChanges() {
             )}
           </div>
         </main>
+        {!loading && allFiles.length > 0 && (
+          <DiffToolbar
+            filters={filters}
+            setFilters={setFilters}
+            resetFilters={resetFilters}
+            toggleExtension={toggleExtension}
+            toggleStatus={toggleStatus}
+            hasActiveFilters={hasActiveFilters}
+            availableExtensions={availableExtensions}
+            totalCount={allFiles.length}
+            filteredCount={files.length}
+            visible={showFilterBar}
+          />
+        )}
       </SidebarInset>
     </SidebarProvider>
   )

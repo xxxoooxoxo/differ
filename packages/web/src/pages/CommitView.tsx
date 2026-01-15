@@ -26,11 +26,7 @@ export function CommitView() {
 
   const { focusedIndex } = useVimNavigation({
     files,
-    isExpanded: (path) => diffListRef.current?.isExpanded(path) ?? false,
-    onToggleExpanded: (path, expanded) => diffListRef.current?.toggleFile(path, expanded),
-    onExpandAll: () => diffListRef.current?.expandAll(),
-    onCollapseAll: () => diffListRef.current?.collapseAll(),
-    scrollToIndex: (index) => diffListRef.current?.scrollToIndex(index),
+    diffListRef,
     scrollContainerRef: contentRef,
     openInEditor,
   })
@@ -86,7 +82,7 @@ export function CommitView() {
         loading={loading}
         headerContent={headerContent}
       />
-      <SidebarInset>
+      <SidebarInset className="h-svh overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
@@ -97,7 +93,7 @@ export function CommitView() {
             onDiffStyleChange={setDiffStyle}
           />
         </header>
-        <main className="flex-1 overflow-y-auto bg-secondary/30" ref={contentRef}>
+        <main className="flex-1 min-h-0 overflow-y-auto bg-secondary/30" ref={contentRef}>
           <div className="p-4">
             {loading ? (
               <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
