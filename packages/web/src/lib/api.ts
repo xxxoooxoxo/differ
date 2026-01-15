@@ -113,7 +113,7 @@ async function getTauriListen() {
 export async function setRepoPath(path: string): Promise<void> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    await invoke('set_repo_path', { path })
+    await invoke('cmd_set_repo_path', { path })
   } else {
     // In web mode, repo path is set by the server
     throw new Error('setRepoPath is only available in Tauri mode')
@@ -123,7 +123,7 @@ export async function setRepoPath(path: string): Promise<void> {
 export async function getCurrentDiff(): Promise<DiffResult> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_diff_current', {}) as Promise<DiffResult>
+    return invoke('cmd_get_diff_current', {}) as Promise<DiffResult>
   } else {
     const res = await fetch('/api/diff/current')
     if (!res.ok) throw new Error('Failed to fetch current diff')
@@ -134,7 +134,7 @@ export async function getCurrentDiff(): Promise<DiffResult> {
 export async function getFilePatch(path: string): Promise<string> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_diff_file', { path }) as Promise<string>
+    return invoke('cmd_get_diff_file', { path }) as Promise<string>
   } else {
     const res = await fetch(`/api/diff/file?path=${encodeURIComponent(path)}`)
     if (!res.ok) throw new Error('Failed to fetch file patch')
@@ -146,7 +146,7 @@ export async function getFilePatch(path: string): Promise<string> {
 export async function getCommits(page: number = 1, limit: number = 20): Promise<CommitHistory> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_commits', { page, limit }) as Promise<CommitHistory>
+    return invoke('cmd_get_commits', { page, limit }) as Promise<CommitHistory>
   } else {
     const res = await fetch(`/api/commits?page=${page}&limit=${limit}`)
     if (!res.ok) throw new Error('Failed to fetch commits')
@@ -157,7 +157,7 @@ export async function getCommits(page: number = 1, limit: number = 20): Promise<
 export async function getCommitDiff(sha: string): Promise<CommitDiff> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_commit', { sha }) as Promise<CommitDiff>
+    return invoke('cmd_get_commit', { sha }) as Promise<CommitDiff>
   } else {
     const res = await fetch(`/api/commits/${sha}/diff`)
     if (!res.ok) throw new Error('Failed to fetch commit diff')
@@ -168,7 +168,7 @@ export async function getCommitDiff(sha: string): Promise<CommitDiff> {
 export async function getBranches(): Promise<BranchList> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_branch_list', {}) as Promise<BranchList>
+    return invoke('cmd_get_branch_list', {}) as Promise<BranchList>
   } else {
     const res = await fetch('/api/branches')
     if (!res.ok) throw new Error('Failed to fetch branches')
@@ -179,7 +179,7 @@ export async function getBranches(): Promise<BranchList> {
 export async function compareBranches(base: string, head: string): Promise<CompareBranchesResult> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('compare_branch', { base, head }) as Promise<CompareBranchesResult>
+    return invoke('cmd_compare_branch', { base, head }) as Promise<CompareBranchesResult>
   } else {
     const res = await fetch(`/api/branches/compare?base=${encodeURIComponent(base)}&head=${encodeURIComponent(head)}`)
     if (!res.ok) throw new Error('Failed to compare branches')
@@ -190,7 +190,7 @@ export async function compareBranches(base: string, head: string): Promise<Compa
 export async function getFileContents(path: string, ref?: string): Promise<string> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_file', { path, gitRef: ref }) as Promise<string>
+    return invoke('cmd_get_file', { path, gitRef: ref }) as Promise<string>
   } else {
     const params = new URLSearchParams({ path })
     if (ref) params.set('ref', ref)
@@ -204,7 +204,7 @@ export async function getFileContents(path: string, ref?: string): Promise<strin
 export async function getRemoteInfo(): Promise<RemoteInfo | null> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_remote', {}) as Promise<RemoteInfo | null>
+    return invoke('cmd_get_remote', {}) as Promise<RemoteInfo | null>
   } else {
     const res = await fetch('/api/branches/remote')
     if (!res.ok) return null
@@ -220,8 +220,8 @@ export interface FetchResult {
 
 export async function fetchFromRemote(remote = 'origin'): Promise<FetchResult> {
   if (isTauri()) {
-    const invoke = await getTauriInvoke()
-    return invoke('fetch_remote', { remote }) as Promise<FetchResult>
+    // Not implemented in Tauri yet
+    throw new Error('fetchFromRemote is not yet available in Tauri mode')
   } else {
     const res = await fetch('/api/branches/fetch', {
       method: 'POST',
@@ -239,7 +239,7 @@ export async function fetchFromRemote(remote = 'origin'): Promise<FetchResult> {
 export async function getConfig(): Promise<DifferConfig> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('get_config', {}) as Promise<DifferConfig>
+    return invoke('cmd_get_config', {}) as Promise<DifferConfig>
   } else {
     const res = await fetch('/api/config')
     if (!res.ok) throw new Error('Failed to fetch config')
@@ -251,7 +251,7 @@ export async function setConfig(config: Partial<DifferConfig>): Promise<void> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
     const currentConfig = await getConfig()
-    await invoke('set_config', { config: { ...currentConfig, ...config } })
+    await invoke('cmd_set_config', { config: { ...currentConfig, ...config } })
   } else {
     const res = await fetch('/api/config', {
       method: 'POST',
@@ -265,7 +265,7 @@ export async function setConfig(config: Partial<DifferConfig>): Promise<void> {
 export async function openInEditor(filePath: string, editor: string): Promise<void> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    await invoke('open_in_editor', { filePath, editor })
+    await invoke('cmd_open_in_editor', { filePath, editor })
   } else {
     const res = await fetch('/api/editor/open', {
       method: 'POST',
@@ -358,4 +358,59 @@ export async function selectDirectory(): Promise<string | null> {
     return selected as string | null
   }
   return null
+}
+
+// Worktrees API
+export interface WorktreeInfo {
+  path: string
+  branch: string
+  commit: string
+  isCurrent: boolean
+  isActive: boolean
+  behindMain: number
+  aheadOfMain: number
+  lastActivity: string
+}
+
+export interface WorktreesResponse {
+  worktrees: WorktreeInfo[]
+  current: string
+  activePath: string
+  mainBranch: string
+}
+
+export async function getWorktrees(onlyBehind = false): Promise<WorktreesResponse> {
+  if (isTauri()) {
+    // Worktrees not implemented in Tauri yet - return empty response
+    return {
+      worktrees: [],
+      current: '',
+      activePath: '',
+      mainBranch: 'main',
+    }
+  } else {
+    const params = new URLSearchParams()
+    if (onlyBehind) params.set('onlyBehind', 'true')
+    const res = await fetch(`/api/worktrees?${params.toString()}`)
+    if (!res.ok) throw new Error('Failed to fetch worktrees')
+    return res.json()
+  }
+}
+
+export async function switchWorktree(path: string): Promise<boolean> {
+  if (isTauri()) {
+    // Not implemented in Tauri yet
+    throw new Error('switchWorktree is not yet available in Tauri mode')
+  } else {
+    const res = await fetch('/api/worktrees/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })
+    if (!res.ok) {
+      const result = await res.json()
+      throw new Error(result.error || 'Failed to switch worktree')
+    }
+    return true
+  }
 }

@@ -1,18 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getCommits, type CommitInfo, type CommitHistory } from '../lib/api'
 
-interface CommitInfo {
-  sha: string
-  shortSha: string
-  message: string
-  author: string
-  authorEmail: string
-  date: string
-  stats: {
-    additions: number
-    deletions: number
-    files: number
-  }
-}
+export type { CommitInfo }
 
 interface CommitsResponse {
   commits: CommitInfo[]
@@ -33,15 +22,16 @@ export function useCommits(initialPage = 1, limit = 20) {
       setLoading(true)
       setError(null)
 
-      const response = await fetch(`/api/commits?page=${pageNum}&limit=${limit}`)
+      const result = await getCommits(pageNum, limit)
+      const totalPages = Math.ceil(result.total / limit)
+      totalPagesRef.current = totalPages
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch commits')
-      }
-
-      const result = await response.json()
-      totalPagesRef.current = result.totalPages
-      setData(result)
+      setData({
+        commits: result.commits,
+        total: result.total,
+        page: pageNum,
+        totalPages,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {

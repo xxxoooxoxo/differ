@@ -1,11 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-
-interface WebSocketMessage {
-  type: string
-  event?: string
-  file?: string
-  timestamp?: number
-}
+import { useEffect, useRef, useState } from 'react'
+import { subscribeToFileChanges, isTauri } from '../lib/api'
 
 interface UseWebSocketReturn {
   isConnected: boolean
@@ -13,8 +7,6 @@ interface UseWebSocketReturn {
 
 export function useWebSocket(onFileChange?: () => void): UseWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false)
-  const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onFileChangeRef = useRef(onFileChange)
 
   // Keep callback ref updated without causing reconnects
@@ -24,78 +16,38 @@ export function useWebSocket(onFileChange?: () => void): UseWebSocketReturn {
 
   useEffect(() => {
     let mounted = true
+    let unsubscribe: (() => void) | null = null
 
-    const connect = () => {
+    const connect = async () => {
       if (!mounted) return
 
-      // Clear any existing connection
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.host}/ws`
-
       try {
-        const ws = new WebSocket(wsUrl)
-        wsRef.current = ws
-
-        ws.onopen = () => {
-          if (mounted) {
-            setIsConnected(true)
+        unsubscribe = await subscribeToFileChanges(() => {
+          if (mounted && onFileChangeRef.current) {
+            onFileChangeRef.current()
           }
-        }
+        })
 
-        ws.onclose = () => {
-          if (mounted) {
-            setIsConnected(false)
-            // Reconnect after 3 seconds
-            reconnectTimeoutRef.current = setTimeout(connect, 3000)
-          }
-        }
-
-        ws.onerror = () => {
-          ws.close()
-        }
-
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data) as WebSocketMessage
-            if (message.type === 'change' && onFileChangeRef.current) {
-              onFileChangeRef.current()
-            }
-          } catch {
-            // Ignore invalid messages
-          }
+        if (mounted) {
+          setIsConnected(true)
         }
       } catch {
-        // Connection failed, retry after delay
+        // Connection failed
         if (mounted) {
-          reconnectTimeoutRef.current = setTimeout(connect, 3000)
+          setIsConnected(false)
         }
       }
     }
 
     connect()
 
-    // Ping interval to keep connection alive
-    const pingInterval = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'ping' }))
-      }
-    }, 30000)
-
     return () => {
       mounted = false
-      clearInterval(pingInterval)
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-      }
-      if (wsRef.current) {
-        wsRef.current.close()
+      if (unsubscribe) {
+        unsubscribe()
       }
     }
-  }, []) // Empty deps - only run once on mount
+  }, [])
 
   return { isConnected }
 }

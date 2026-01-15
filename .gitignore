@@ -8,3 +8,11 @@ dist/
 *.tsbuildinfo
 *.d.ts.map
 vite.config.d.ts
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+
+# Publishing artifacts
+publish/

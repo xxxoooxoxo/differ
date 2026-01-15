@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { FileDiffInfo } from '@/lib/api'
+import type { FileDiffInfo } from '../lib/api'
 
 export type SortBy = 'modified' | 'name' | 'extension' | 'status' | 'changes'
 export type SortOrder = 'asc' | 'desc'

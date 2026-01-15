@@ -1,24 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  getCurrentDiff,
+  getCommitDiff as apiGetCommitDiff,
+  type DiffResult,
+  type CommitDiff,
+  type FileDiffInfo,
+} from '../lib/api'
 
-interface FileDiffInfo {
-  path: string
-  oldPath?: string
-  status: 'added' | 'deleted' | 'modified' | 'renamed'
-  additions: number
-  deletions: number
-  oldContent?: string
-  newContent?: string
-  patch?: string
-}
-
-interface DiffResult {
-  files: FileDiffInfo[]
-  stats: {
-    additions: number
-    deletions: number
-    files: number
-  }
-}
+export type { DiffResult, FileDiffInfo }
 
 export function useGitDiff() {
   const [data, setData] = useState<DiffResult | null>(null)
@@ -30,13 +19,7 @@ export function useGitDiff() {
       setLoading(true)
       setError(null)
 
-      const response = await fetch('/api/diff/current')
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch diff')
-      }
-
-      const result = await response.json()
+      const result = await getCurrentDiff()
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -53,10 +36,10 @@ export function useGitDiff() {
 }
 
 export function useCommitDiff(sha: string | null) {
-  const [data, setData] = useState<{ commit: any; files: FileDiffInfo[] } | null>(null)
+  const [data, setData] = useState<CommitDiff | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
+  const currentShaRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!sha) {
@@ -64,50 +47,41 @@ export function useCommitDiff(sha: string | null) {
       return
     }
 
-    // Abort previous request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-
-    const abortController = new AbortController()
-    abortControllerRef.current = abortController
+    // Track current sha to ignore stale responses
+    currentShaRef.current = sha
 
     const fetchCommitDiff = async () => {
       try {
         setLoading(true)
         setError(null)
 
-        const response = await fetch(`/api/commits/${sha}/diff`, {
-          signal: abortController.signal,
-        })
+        const result = await apiGetCommitDiff(sha)
 
-        if (!response.ok) {
-          throw new Error('Failed to fetch commit diff')
+        // Only update if this is still the current request
+        if (currentShaRef.current === sha) {
+          setData(result)
         }
-
-        const result = await response.json()
-        setData(result)
       } catch (err) {
-        // Ignore abort errors
-        if (err instanceof Error && err.name === 'AbortError') {
-          return
+        if (currentShaRef.current === sha) {
+          setError(err instanceof Error ? err.message : 'Unknown error')
         }
-        setError(err instanceof Error ? err.message : 'Unknown error')
       } finally {
-        setLoading(false)
+        if (currentShaRef.current === sha) {
+          setLoading(false)
+        }
       }
     }
 
     fetchCommitDiff()
 
     return () => {
-      abortController.abort()
+      currentShaRef.current = null
     }
   }, [sha])
 
   const refetch = useCallback(() => {
     if (!sha) return
-    // Trigger re-fetch by creating new effect cycle
+    // Trigger re-fetch by clearing data
     setData(null)
   }, [sha])
 

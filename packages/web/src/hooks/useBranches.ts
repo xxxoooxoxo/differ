@@ -1,18 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
+import {
+  getBranches,
+  compareBranches,
+  type BranchInfo,
+  type BranchList,
+  type CompareBranchesResult,
+} from '../lib/api'
 
-interface BranchInfo {
-  name: string
-  current: boolean
-  commit: string
-}
-
-interface BranchesResponse {
-  branches: BranchInfo[]
-  current: string
-}
+export type { BranchInfo }
 
 export function useBranches() {
-  const [data, setData] = useState<BranchesResponse | null>(null)
+  const [data, setData] = useState<BranchList | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -21,13 +19,7 @@ export function useBranches() {
       setLoading(true)
       setError(null)
 
-      const response = await fetch('/api/branches')
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch branches')
-      }
-
-      const result = await response.json()
+      const result = await getBranches()
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -44,7 +36,7 @@ export function useBranches() {
 }
 
 export function useCompareBranches(base: string | null, head: string | null) {
-  const [data, setData] = useState<any>(null)
+  const [data, setData] = useState<CompareBranchesResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -58,14 +50,7 @@ export function useCompareBranches(base: string | null, head: string | null) {
       setLoading(true)
       setError(null)
 
-      const params = new URLSearchParams({ base, head })
-      const response = await fetch(`/api/branches/compare?${params.toString()}`)
-
-      if (!response.ok) {
-        throw new Error('Failed to compare branches')
-      }
-
-      const result = await response.json()
+      const result = await compareBranches(base, head)
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')

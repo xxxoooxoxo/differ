@@ -16,6 +16,7 @@ interface VimNavigationOptions {
   onExpandAll: () => void
   onCollapseAll: () => void
   scrollToIndex: (index: number) => void
+  scrollContainerRef: React.RefObject<HTMLElement | null>
   openInEditor?: (path: string) => void
 }
 
@@ -26,20 +27,66 @@ interface VimNavigationState {
 }
 
 /**
- * Get hunk header elements for a file
+ * Get hunk header elements for a file.
+ * Tries multiple selectors to be compatible with different @pierre/diffs versions.
  */
 function getHunkElements(filePath: string): HTMLElement[] {
   const container = document.getElementById(`diff-${CSS.escape(filePath)}`)
   if (!container) return []
-  return Array.from(container.querySelectorAll('[data-separator="line-info"]')) as HTMLElement[]
+
+  // Try the data-separator attribute first (standard @pierre/diffs)
+  let hunks = container.querySelectorAll('[data-separator="line-info"]')
+  if (hunks.length > 0) {
+    return Array.from(hunks) as HTMLElement[]
+  }
+
+  // Fallback: look for elements containing @@ hunk header pattern
+  const candidates = container.querySelectorAll('div, span, td')
+  const hunkElements: HTMLElement[] = []
+  candidates.forEach((el) => {
+    const text = el.textContent?.trim() || ''
+    // Match @@ -x,y +x,y @@ pattern and ensure it's a leaf-ish node
+    if (/^@@\s*-\d+/.test(text) && el.children.length <= 2) {
+      hunkElements.push(el as HTMLElement)
+    }
+  })
+
+  return hunkElements
 }
 
 /**
- * Scroll a hunk into view
+ * Scroll a hunk into view within the specified scroll container.
+ * Always scrolls to keep navigation feeling responsive.
  */
-function scrollToHunk(filePath: string, hunkIndex: number) {
-  const hunks = getHunkElements(filePath)
-  hunks[hunkIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+function scrollToHunk(
+  filePath: string,
+  hunkIndex: number,
+  scrollContainer: HTMLElement | null
+) {
+  // Use requestAnimationFrame to ensure DOM is ready
+  requestAnimationFrame(() => {
+    const hunks = getHunkElements(filePath)
+    const hunk = hunks[hunkIndex]
+
+    if (!hunk) return
+
+    if (scrollContainer) {
+      // Calculate scroll position to center the hunk in the container
+      const hunkRect = hunk.getBoundingClientRect()
+      const containerRect = scrollContainer.getBoundingClientRect()
+
+      const hunkOffsetTop = hunkRect.top - containerRect.top + scrollContainer.scrollTop
+      const centeredScrollTop = hunkOffsetTop - containerRect.height / 2 + hunkRect.height / 2
+
+      scrollContainer.scrollTo({
+        top: Math.max(0, centeredScrollTop),
+        behavior: 'smooth',
+      })
+    } else {
+      // Fallback: use scrollIntoView
+      hunk.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
 }
 
 /**
@@ -64,6 +111,7 @@ export function useVimNavigation({
   onExpandAll,
   onCollapseAll,
   scrollToIndex,
+  scrollContainerRef,
   openInEditor,
 }: VimNavigationOptions): VimNavigationState & {
   setFocusedIndex: (index: number | null) => void
@@ -176,12 +224,12 @@ export function useVimNavigation({
           } else if (focusedHunkIndex === null) {
             // Not in hunk mode → focus first hunk
             setFocusedHunkIndex(0)
-            scrollToHunk(file.path, 0)
+            scrollToHunk(file.path, 0, scrollContainerRef.current)
           } else if (focusedHunkIndex < hunkCount - 1) {
             // Move to next hunk
             const nextHunk = focusedHunkIndex + 1
             setFocusedHunkIndex(nextHunk)
-            scrollToHunk(file.path, nextHunk)
+            scrollToHunk(file.path, nextHunk, scrollContainerRef.current)
           } else {
             // At last hunk → next file
             navigateToFile(focusedIndex + 1)
@@ -215,12 +263,12 @@ export function useVimNavigation({
             // Not in hunk mode → focus last hunk
             const lastHunk = hunkCount - 1
             setFocusedHunkIndex(lastHunk)
-            scrollToHunk(file.path, lastHunk)
+            scrollToHunk(file.path, lastHunk, scrollContainerRef.current)
           } else if (focusedHunkIndex > 0) {
             // Move to prev hunk
             const prevHunk = focusedHunkIndex - 1
             setFocusedHunkIndex(prevHunk)
-            scrollToHunk(file.path, prevHunk)
+            scrollToHunk(file.path, prevHunk, scrollContainerRef.current)
           } else {
             // At first hunk → prev file, focus its last hunk
             if (focusedIndex > 0) {
@@ -235,7 +283,7 @@ export function useVimNavigation({
                   const prevHunks = getHunkElements(prevFile.path)
                   if (prevHunks.length > 0) {
                     setFocusedHunkIndex(prevHunks.length - 1)
-                    scrollToHunk(prevFile.path, prevHunks.length - 1)
+                    scrollToHunk(prevFile.path, prevHunks.length - 1, scrollContainerRef.current)
                   }
                 }
               }, 50)
@@ -268,7 +316,7 @@ export function useVimNavigation({
               const hunks = getHunkElements(file.path)
               if (hunks.length > 0) {
                 setFocusedHunkIndex(0)
-                scrollToHunk(file.path, 0)
+                scrollToHunk(file.path, 0, scrollContainerRef.current)
               }
             }, 50)
           }
@@ -290,7 +338,7 @@ export function useVimNavigation({
               const hunks = getHunkElements(file.path)
               if (hunks.length > 0) {
                 setFocusedHunkIndex(0)
-                scrollToHunk(file.path, 0)
+                scrollToHunk(file.path, 0, scrollContainerRef.current)
               }
             }, 50)
           } else {
@@ -366,6 +414,7 @@ export function useVimNavigation({
     navigateToFile,
     deactivate,
     scrollToIndex,
+    scrollContainerRef,
   ])
 
   useEffect(() => {

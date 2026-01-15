@@ -42,6 +42,7 @@ export function CurrentChanges() {
     onExpandAll: () => diffListRef.current?.expandAll(),
     onCollapseAll: () => diffListRef.current?.collapseAll(),
     scrollToIndex: (index) => diffListRef.current?.scrollToIndex(index),
+    scrollContainerRef: contentRef,
     openInEditor,
   })
 

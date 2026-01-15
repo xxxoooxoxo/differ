@@ -7,10 +7,16 @@
     "dev:server": "bun --watch run packages/cli/src/index.ts",
     "build": "bun run --filter @differ/web build",
     "build:cli": "bun run build && mkdir -p dist/web && cp -r packages/web/dist dist/web/ && bun build packages/cli/src/index.ts --compile --outfile dist/differ && node -e \"console.log('\\n✅ Built standalone binary: dist/differ\\n\\nTo install globally, run:\\n\\nsudo ln -sf ' + process.cwd() + '/dist/differ /usr/local/bin/differ\\n')\"",
+    "build:publish": "bun run build && bun build packages/cli/src/index.ts --outdir publish/bin --target bun --external open && cp -r packages/web/dist publish/web && echo '✅ Ready to publish. Run: cd publish && npm publish'",
     "typecheck": "tsc -p packages/web/tsconfig.json --noEmit && tsc -p packages/server/tsconfig.json --noEmit",
-    "differ": "bun run packages/cli/src/index.ts"
+    "differ": "bun run packages/cli/src/index.ts",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:debug": "tauri build --debug"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.2.4",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^25.0.8",
     "bun-types": "^1.3.6",

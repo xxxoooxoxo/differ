@@ -228,7 +228,7 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
       scrollToIndex: (index: number) => {
         if (index >= 0 && index < files.length) {
           virtualizer.scrollToIndex(index, {
-            align: 'start',
+            align: 'center',
             behavior: 'smooth',
           })
         }

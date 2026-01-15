@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useConfig, type EditorType } from './useConfig'
+import { openInEditor as apiOpenInEditor, isTauri } from '../lib/api'
 
 export type { EditorType } from './useConfig'
 
@@ -63,7 +64,7 @@ export function useEditor() {
   const [localEditor, setLocalEditor] = useState<EditorType | null>(null)
 
   // Use local state if set, otherwise use config
-  const editor = localEditor ?? config?.editor ?? 'vscode'
+  const editor = localEditor ?? (config?.editor as EditorType) ?? 'vscode'
 
   const setEditor = useCallback(
     (newEditor: EditorType) => {
@@ -84,15 +85,25 @@ export function useEditor() {
   )
 
   const openInEditor = useCallback(
-    (filePath: string, line?: number, column?: number) => {
-      const url = getEditorUrl(filePath, line, column)
-      if (url) {
-        window.location.href = url
+    async (filePath: string, line?: number, column?: number) => {
+      if (isTauri()) {
+        // Use Tauri command to open file in editor
+        try {
+          await apiOpenInEditor(filePath, editor)
+        } catch (err) {
+          console.error('Failed to open in editor:', err)
+        }
       } else {
-        console.error('Cannot open in editor: repoPath not available')
+        // Web mode: use URL scheme
+        const url = getEditorUrl(filePath, line, column)
+        if (url) {
+          window.location.href = url
+        } else {
+          console.error('Cannot open in editor: repoPath not available')
+        }
       }
     },
-    [getEditorUrl]
+    [getEditorUrl, editor]
   )
 
   return {

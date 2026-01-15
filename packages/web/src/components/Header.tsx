@@ -2,6 +2,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useEditor, type EditorType } from '../hooks/useEditor'
 import { useWorktrees, type WorktreeInfo } from '../hooks/useWorktrees'
 import { useBranches } from '../hooks/useBranches'
+import { useRemoteUrl, type RemoteInfo } from '../hooks/useRemoteUrl'
+import { useFetch } from '../hooks/useFetch'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import {
@@ -20,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
-import { GitBranch, Folder, ChevronDown } from 'lucide-react'
+import { GitBranch, Folder, ChevronDown, ExternalLink, GitPullRequest, Eye, CloudDownload, Loader2 } from 'lucide-react'
 
 export type DiffStyle = 'split' | 'unified'
 
@@ -233,6 +235,101 @@ function BranchSelector() {
   )
 }
 
+function getRemoteUrls(remote: RemoteInfo, branch: string) {
+  const { url, provider } = remote
+
+  switch (provider) {
+    case 'github':
+      return {
+        viewBranch: `${url}/tree/${branch}`,
+        createPr: `${url}/compare/${branch}?expand=1`,
+        viewPrs: `${url}/pulls`,
+      }
+    case 'gitlab':
+      return {
+        viewBranch: `${url}/-/tree/${branch}`,
+        createPr: `${url}/-/merge_requests/new?merge_request[source_branch]=${branch}`,
+        viewPrs: `${url}/-/merge_requests`,
+      }
+    case 'bitbucket':
+      return {
+        viewBranch: `${url}/src/${branch}`,
+        createPr: `${url}/pull-requests/new?source=${branch}`,
+        viewPrs: `${url}/pull-requests`,
+      }
+    default:
+      return {
+        viewBranch: url,
+        createPr: url,
+        viewPrs: url,
+      }
+  }
+}
+
+function getProviderName(provider: RemoteInfo['provider']): string {
+  switch (provider) {
+    case 'github':
+      return 'GitHub'
+    case 'gitlab':
+      return 'GitLab'
+    case 'bitbucket':
+      return 'Bitbucket'
+    default:
+      return 'Remote'
+  }
+}
+
+function RemoteDropdown() {
+  const { remote, loading } = useRemoteUrl()
+  const { data: branchData } = useBranches()
+
+  const currentBranch = branchData?.current ?? 'main'
+
+  if (loading || !remote) return null
+
+  const urls = getRemoteUrls(remote, currentBranch)
+  const providerName = getProviderName(remote.provider)
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-1.5 h-7">
+          <ExternalLink className="size-3.5" />
+          <span className="text-xs">{providerName}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+          {remote.owner}/{remote.repo}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="gap-2"
+          onClick={() => window.open(urls.viewBranch, '_blank')}
+        >
+          <Eye className="size-3.5" />
+          <span className="text-xs">View branch on {providerName}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-2"
+          onClick={() => window.open(urls.createPr, '_blank')}
+        >
+          <GitPullRequest className="size-3.5" />
+          <span className="text-xs">Create Pull Request</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-2"
+          onClick={() => window.open(urls.viewPrs, '_blank')}
+        >
+          <GitBranch className="size-3.5" />
+          <span className="text-xs">View Pull Requests</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 interface HeaderProps {
   isConnected: boolean
   stats?: {
@@ -309,6 +406,7 @@ export function HeaderControls({
   isConnected: boolean
 }) {
   const { editor, setEditor, editors, editorTypes } = useEditor()
+  const { loading: isFetching, performFetch } = useFetch()
 
   return (
     <div className="flex items-center gap-2">
@@ -334,7 +432,24 @@ export function HeaderControls({
         </SelectContent>
       </Select>
 
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-1.5 h-7"
+        onClick={() => performFetch()}
+        disabled={isFetching}
+        title="Fetch from remote"
+      >
+        {isFetching ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <CloudDownload className="size-3.5" />
+        )}
+        <span className="text-xs">Fetch</span>
+      </Button>
+
       <BranchSelector />
+      <RemoteDropdown />
       <WorktreeDropdown />
 
       <div className="flex items-center gap-1.5 pl-2 text-xs text-muted-foreground">
