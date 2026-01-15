@@ -151,3 +151,9 @@
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
 }
+
+/* Vim navigation: focused hunk highlight */
+[data-separator="line-info"].hunk-focused {
+  background: rgba(59, 130, 246, 0.15) !important;
+  box-shadow: inset 3px 0 0 rgb(59, 130, 246);
+}
