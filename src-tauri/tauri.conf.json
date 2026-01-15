@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Differ",
+  "version": "0.1.0",
+  "identifier": "com.differ.app",
+  "build": {
+    "frontendDist": "../packages/web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "bun run --filter @differ/web dev",
+    "beforeBuildCommand": "bun run --filter @differ/web build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Differ",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {}
+}

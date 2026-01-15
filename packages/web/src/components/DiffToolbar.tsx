@@ -20,6 +20,7 @@ interface DiffToolbarProps {
   availableExtensions: string[]
   totalCount: number
   filteredCount: number
+  visible?: boolean
 }
 
 const SORT_OPTIONS: { value: `${SortBy}-${SortOrder}`; label: string }[] = [
@@ -50,6 +51,7 @@ export function DiffToolbar({
   availableExtensions,
   totalCount,
   filteredCount,
+  visible = true,
 }: DiffToolbarProps) {
   const sortValue = `${filters.sortBy}-${filters.sortOrder}` as const
 
@@ -61,7 +63,11 @@ export function DiffToolbar({
   const showingFiltered = hasActiveFilters && filteredCount !== totalCount
 
   return (
-    <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-background border border-border rounded-lg">
+    <div
+      className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center gap-2 p-3 bg-background/95 backdrop-blur-sm border border-border rounded-xl shadow-lg transition-all duration-200 ease-out ${
+        visible ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0 pointer-events-none'
+      }`}
+    >
       {/* Sort dropdown */}
       <div className="flex items-center gap-2">
         <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
@@ -129,27 +135,24 @@ export function DiffToolbar({
         )}
       </div>
 
-      {/* Spacer */}
-      <div className="flex-1" />
+      <div className="h-4 w-px bg-border" />
 
       {/* File count */}
-      {showingFiltered ? (
-        <span className="text-xs text-muted-foreground">
-          Showing {filteredCount} of {totalCount} files
-        </span>
-      ) : (
-        <span className="text-xs text-muted-foreground">
-          {totalCount} {totalCount === 1 ? 'file' : 'files'}
-        </span>
-      )}
+      <span className="text-xs text-muted-foreground tabular-nums">
+        {showingFiltered
+          ? `${filteredCount}/${totalCount}`
+          : `${totalCount} ${totalCount === 1 ? 'file' : 'files'}`}
+      </span>
 
-      {/* Clear filters */}
-      {hasActiveFilters && (
-        <Button variant="ghost" size="sm" onClick={resetFilters} className="h-8 px-2">
-          <X className="h-4 w-4 mr-1" />
-          Clear
-        </Button>
-      )}
+      {/* Clear filters - always rendered to prevent layout shift */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={resetFilters}
+        className={`h-8 px-2 transition-opacity ${hasActiveFilters ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+      >
+        <X className="h-4 w-4" />
+      </Button>
     </div>
   )
 }

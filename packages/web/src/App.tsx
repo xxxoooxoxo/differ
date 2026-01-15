@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { CurrentChanges } from './pages/CurrentChanges'
 import { HistoryPage } from './pages/HistoryPage'
 import { CommitView } from './pages/CommitView'
 import { CompareView } from './pages/CompareView'
 import { WelcomePage } from './pages/WelcomePage'
-import { isTauri } from './lib/api'
+import { isTauri, selectDirectory, setRepoPath as setRepoPathApi } from './lib/api'
 
 function AppRoutes() {
   return (
@@ -23,35 +23,55 @@ export function App() {
   const [initialized, setInitialized] = useState(!isTauri())
 
   useEffect(() => {
-    // In Tauri mode, check if we have injected repo path
+    // In Tauri mode, check if we have a last opened repo
     if (isTauri()) {
-      // Could also check localStorage for last opened repo
       const lastRepo = localStorage.getItem('differ:lastRepo')
       if (lastRepo) {
         // Try to open the last used repo
-        import('./lib/api').then(({ setRepoPath: setRepo }) => {
-          setRepo(lastRepo)
-            .then(() => {
-              setRepoPath(lastRepo)
-              setInitialized(true)
-            })
-            .catch(() => {
-              // Repo no longer exists or is invalid
-              localStorage.removeItem('differ:lastRepo')
-              setInitialized(true)
-            })
-        })
+        setRepoPathApi(lastRepo)
+          .then(() => {
+            setRepoPath(lastRepo)
+            setInitialized(true)
+          })
+          .catch(() => {
+            // Repo no longer exists or is invalid
+            localStorage.removeItem('differ:lastRepo')
+            setInitialized(true)
+          })
       } else {
         setInitialized(true)
       }
     }
   }, [])
 
-  const handleRepoSelected = (path: string) => {
+  const handleRepoSelected = useCallback((path: string) => {
     setRepoPath(path)
     // Remember the repo for next launch
     localStorage.setItem('differ:lastRepo', path)
-  }
+  }, [])
+
+  // Keyboard shortcut to change directory (Cmd/Ctrl+O) in Tauri mode
+  useEffect(() => {
+    if (!isTauri()) return
+
+    const handleKeyDown = async (event: KeyboardEvent) => {
+      if (event.key === 'o' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        try {
+          const path = await selectDirectory()
+          if (path) {
+            await setRepoPathApi(path)
+            handleRepoSelected(path)
+          }
+        } catch (err) {
+          console.error('Failed to change directory:', err)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleRepoSelected])
 
   // Show loading while initializing
   if (!initialized) {

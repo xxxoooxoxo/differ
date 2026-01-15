@@ -232,16 +232,18 @@ function CollapsibleSection({
   count,
   defaultOpen = true,
   maxHeight,
+  className,
   children,
 }: {
   title: string
   count?: number
   defaultOpen?: boolean
   maxHeight?: string
+  className?: string
   children: React.ReactNode
 }) {
   return (
-    <Collapsible defaultOpen={defaultOpen} className="group/section">
+    <Collapsible defaultOpen={defaultOpen} className={cn("group/section", className)}>
       <SidebarGroup className="p-0">
         <CollapsibleTrigger asChild>
           <SidebarGroupLabel className="cursor-pointer hover:bg-sidebar-accent rounded-md px-2 py-1.5 select-none">
@@ -317,14 +319,25 @@ export const AppSidebar = memo(function AppSidebar({
     <Sidebar {...props}>
       {headerContent && <SidebarHeader>{headerContent}</SidebarHeader>}
       <SidebarContent className="gap-0">
-        <CollapsibleSection title="Changed Files" count={files.length} defaultOpen={true} maxHeight="280px">
+        <CollapsibleSection
+          title="Changed Files"
+          count={files.length}
+          defaultOpen={true}
+          maxHeight="280px"
+          className="pb-3"
+        >
           <ListView
             files={files}
             selectedFile={selectedFile}
             onSelectFile={onSelectFile}
           />
         </CollapsibleSection>
-        <CollapsibleSection title="File Tree" defaultOpen={true}>
+        <div className="mx-2 border-t border-sidebar-border" />
+        <CollapsibleSection
+          title="File Tree"
+          defaultOpen={true}
+          className="pt-3"
+        >
           <TreeView
             files={files}
             selectedFile={selectedFile}
