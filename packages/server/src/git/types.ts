@@ -16,6 +16,7 @@ export interface FileDiffInfo {
   newContent?: string
   patch?: string
   isLarge?: boolean
+  modifiedTime?: number // Unix timestamp in ms (from fs.stat mtime)
 }
 
 export interface DiffResult {

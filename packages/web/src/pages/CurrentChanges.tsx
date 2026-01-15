@@ -3,9 +3,11 @@ import { useGitDiff } from '../hooks/useGitDiff'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useVimNavigation } from '../hooks/useVimNavigation'
 import { useEditor } from '../hooks/useEditor'
+import { useDiffFilters } from '../hooks/useDiffFilters'
 import { HeaderContent, type DiffStyle } from '../components/Header'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
+import { DiffToolbar } from '../components/DiffToolbar'
 import { Separator } from '../components/ui/separator'
 
 export function CurrentChanges() {
@@ -19,7 +21,19 @@ export function CurrentChanges() {
   const contentRef = useRef<HTMLElement>(null)
   const diffListRef = useRef<VirtualizedDiffListHandle>(null)
 
-  const files = data?.files || []
+  const allFiles = data?.files || []
+  const {
+    filters,
+    setFilters,
+    resetFilters,
+    toggleExtension,
+    toggleStatus,
+    filteredFiles,
+    hasActiveFilters,
+    availableExtensions,
+  } = useDiffFilters(allFiles)
+
+  const files = filteredFiles
 
   const { focusedIndex } = useVimNavigation({
     files,
@@ -84,6 +98,19 @@ export function CurrentChanges() {
         </header>
         <main className="flex-1 overflow-y-auto bg-secondary/30" ref={contentRef}>
           <div className="p-4">
+            {!loading && allFiles.length > 0 && (
+              <DiffToolbar
+                filters={filters}
+                setFilters={setFilters}
+                resetFilters={resetFilters}
+                toggleExtension={toggleExtension}
+                toggleStatus={toggleStatus}
+                hasActiveFilters={hasActiveFilters}
+                availableExtensions={availableExtensions}
+                totalCount={allFiles.length}
+                filteredCount={files.length}
+              />
+            )}
             {loading ? (
               <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
                 Loading...

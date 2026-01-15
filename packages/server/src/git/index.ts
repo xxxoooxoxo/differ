@@ -1,4 +1,6 @@
 import simpleGit, { type SimpleGit } from 'simple-git'
+import { stat } from 'fs/promises'
+import { join } from 'path'
 import type { DiffResult, FileDiffInfo, CommitInfo, BranchInfo, WorktreeInfo } from './types'
 
 export * from './types'
@@ -19,10 +21,11 @@ function getFileStats(file: { binary?: boolean; insertions?: number; deletions?:
 
 export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
   // Get diff of working directory against HEAD
-  // Run diffSummary and name-status in parallel to reduce git calls
-  const [diffSummary, nameStatusRaw] = await Promise.all([
+  // Run diffSummary, name-status, and get repo root in parallel to reduce git calls
+  const [diffSummary, nameStatusRaw, repoRoot] = await Promise.all([
     git.diffSummary(['HEAD']),
     git.raw(['diff', '--name-status', 'HEAD']),
+    git.revparse(['--show-toplevel']).then((r) => r.trim()),
   ])
 
   // Parse name-status output to get file statuses (A=added, D=deleted, M=modified, R=renamed)
@@ -68,6 +71,19 @@ export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
       isLarge,
     })
   }
+
+  // Fetch file modification times in parallel (skip deleted files as they don't exist)
+  await Promise.all(
+    files.map(async (f) => {
+      if (f.status === 'deleted') return
+      try {
+        const fileStat = await stat(join(repoRoot, f.path))
+        f.modifiedTime = fileStat.mtime.getTime()
+      } catch {
+        // File might not exist (e.g., staged but deleted)
+      }
+    })
+  )
 
   return {
     files,
@@ -351,4 +367,79 @@ export async function getWorktrees(
   worktrees.sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime())
 
   return { worktrees, current: currentPath }
+}
+
+export interface RemoteInfo {
+  url: string
+  provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown'
+  owner: string
+  repo: string
+}
+
+export async function getRemoteUrl(git: SimpleGit): Promise<RemoteInfo | null> {
+  try {
+    const remoteUrl = (await git.raw(['config', '--get', 'remote.origin.url'])).trim()
+    if (!remoteUrl) return null
+
+    // Parse SSH format: git@github.com:owner/repo.git
+    // Parse HTTPS format: https://github.com/owner/repo.git
+    let url: string
+    let owner: string
+    let repo: string
+    let provider: RemoteInfo['provider'] = 'unknown'
+
+    if (remoteUrl.startsWith('git@')) {
+      // SSH format: git@github.com:owner/repo.git
+      const match = remoteUrl.match(/^git@([^:]+):(.+?)(?:\.git)?$/)
+      if (!match) return null
+
+      const host = match[1]
+      const path = match[2]
+      const [ownerPart, repoPart] = path.split('/')
+
+      url = `https://${host}/${path}`
+      owner = ownerPart
+      repo = repoPart.replace(/\.git$/, '')
+      provider = detectProvider(host)
+    } else {
+      // HTTPS format: https://github.com/owner/repo.git
+      try {
+        const parsed = new URL(remoteUrl)
+        const pathParts = parsed.pathname.replace(/^\//, '').replace(/\.git$/, '').split('/')
+
+        url = `${parsed.protocol}//${parsed.host}/${pathParts.join('/')}`
+        owner = pathParts[0] || ''
+        repo = pathParts[1] || ''
+        provider = detectProvider(parsed.host)
+      } catch {
+        return null
+      }
+    }
+
+    return { url, provider, owner, repo }
+  } catch {
+    return null
+  }
+}
+
+function detectProvider(host: string): RemoteInfo['provider'] {
+  if (host.includes('github')) return 'github'
+  if (host.includes('gitlab')) return 'gitlab'
+  if (host.includes('bitbucket')) return 'bitbucket'
+  return 'unknown'
+}
+
+export interface FetchResult {
+  success: boolean
+  remote: string
+  message: string
+}
+
+export async function performFetch(git: SimpleGit, remote = 'origin'): Promise<FetchResult> {
+  await git.fetch([remote])
+  return {
+    success: true,
+    remote,
+    message: `Successfully fetched from ${remote}`,
+  }
 }
