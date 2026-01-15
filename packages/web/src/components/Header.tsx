@@ -1,6 +1,7 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useEditor, type EditorType } from '../hooks/useEditor'
 import { useWorktrees, type WorktreeInfo } from '../hooks/useWorktrees'
+import { useBranches } from '../hooks/useBranches'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import {
@@ -19,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
-import { GitBranch, Folder } from 'lucide-react'
+import { GitBranch, Folder, ChevronDown } from 'lucide-react'
 
 export type DiffStyle = 'split' | 'unified'
 
@@ -48,6 +49,9 @@ function WorktreeDropdown() {
   if (loading || count === 0) return null
 
   const activeWorktree = worktrees.find(w => w.isActive)
+  // Find main worktree (usually on main/master branch or the one marked as "current" by git)
+  const mainWorktree = worktrees.find(w => w.branch === 'main' || w.branch === 'master') || worktrees.find(w => w.isCurrent)
+  const isOnMain = activeWorktree?.path === mainWorktree?.path
 
   const openInEditor = (path: string) => {
     const editorUrls: Record<EditorType, string> = {
@@ -87,12 +91,27 @@ function WorktreeDropdown() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
+        {/* Quick action to go back to main */}
+        {!isOnMain && mainWorktree && (
+          <>
+            <DropdownMenuItem
+              className="justify-center text-xs font-medium"
+              onClick={() => handleSwitchWorktree(mainWorktree.path)}
+              disabled={switching}
+            >
+              <GitBranch className="mr-1.5 size-3" />
+              Back to {mainWorktree.branch}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
-          Switch worktree
+          All worktrees
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {worktrees.map((wt: WorktreeInfo) => {
           const dirName = wt.path.split('/').pop() || wt.path
+          const isMain = wt.branch === 'main' || wt.branch === 'master'
           return (
             <DropdownMenuItem
               key={wt.path}
@@ -107,9 +126,9 @@ function WorktreeDropdown() {
                     viewing
                   </Badge>
                 )}
-                {wt.isCurrent && !wt.isActive && (
-                  <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
-                    checkout
+                {isMain && !wt.isActive && (
+                  <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                    main
                   </Badge>
                 )}
                 <div className="ml-auto flex gap-1">
@@ -137,6 +156,75 @@ function WorktreeDropdown() {
                 <span className="text-muted-foreground">{formatRelativeTime(wt.lastActivity)}</span>
               </div>
               <span className="font-mono text-[11px] text-muted-foreground">{dirName}</span>
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function BranchSelector() {
+  const { data, loading } = useBranches()
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  const branches = data?.branches ?? []
+  const currentBranch = data?.current ?? 'main'
+
+  if (loading || branches.length === 0) return null
+
+  // Find the main/master branch for comparison base
+  const mainBranch = branches.find(b => b.name === 'main' || b.name === 'master')?.name || branches[0]?.name
+
+  const handleSelectBranch = (branchName: string) => {
+    // Navigate to compare view with this branch vs main
+    if (branchName === mainBranch) {
+      // If selecting main, just go to current changes
+      navigate('/')
+    } else {
+      navigate(`/compare?base=${mainBranch}&head=${branchName}`)
+    }
+  }
+
+  // Parse current comparison from URL if on compare page
+  const searchParams = new URLSearchParams(location.search)
+  const compareHead = location.pathname === '/compare' ? searchParams.get('head') : null
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-1.5 h-7">
+          <GitBranch className="size-3.5" />
+          <span className="max-w-28 truncate text-xs">{compareHead || currentBranch}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto">
+        <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+          View branch diff
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {branches.map((branch) => {
+          const isMain = branch.name === mainBranch
+          const isSelected = compareHead === branch.name || (!compareHead && branch.current)
+          return (
+            <DropdownMenuItem
+              key={branch.name}
+              className={`gap-2 ${isSelected ? 'bg-accent/50' : ''}`}
+              onClick={() => handleSelectBranch(branch.name)}
+            >
+              <span className="font-mono text-xs truncate flex-1">{branch.name}</span>
+              {branch.current && (
+                <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                  HEAD
+                </Badge>
+              )}
+              {isMain && !branch.current && (
+                <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                  base
+                </Badge>
+              )}
             </DropdownMenuItem>
           )
         })}
@@ -246,6 +334,7 @@ export function HeaderControls({
         </SelectContent>
       </Select>
 
+      <BranchSelector />
       <WorktreeDropdown />
 
       <div className="flex items-center gap-1.5 pl-2 text-xs text-muted-foreground">

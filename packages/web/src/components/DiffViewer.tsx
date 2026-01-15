@@ -1,4 +1,4 @@
-import { useState, useEffect, memo, startTransition, useCallback } from 'react'
+import { useState, useEffect, memo, startTransition, useCallback, useRef } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
 import type { DiffStyle } from './Header'
 import { useEditor } from '../hooks/useEditor'
@@ -194,11 +194,16 @@ interface DiffListProps {
 }
 
 export const DiffList = memo(function DiffList({ files, diffStyle }: DiffListProps) {
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set(files.map(f => f.path)))
+  // Start with all collapsed, auto-expand as they enter viewport
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set())
+  const userToggledRef = useRef<Set<string>>(new Set())
+  const viewportEnteredRef = useRef<Set<string>>(new Set())
 
   const allExpanded = files.length > 0 && files.every(f => expandedPaths.has(f.path))
 
   const toggleAll = useCallback(() => {
+    // Mark all as user-toggled
+    files.forEach(f => userToggledRef.current.add(f.path))
     if (allExpanded) {
       setExpandedPaths(new Set())
     } else {
@@ -207,6 +212,7 @@ export const DiffList = memo(function DiffList({ files, diffStyle }: DiffListPro
   }, [allExpanded, files])
 
   const handleToggleFile = useCallback((path: string, expanded: boolean) => {
+    userToggledRef.current.add(path)
     setExpandedPaths(prev => {
       const next = new Set(prev)
       if (expanded) {
@@ -214,6 +220,19 @@ export const DiffList = memo(function DiffList({ files, diffStyle }: DiffListPro
       } else {
         next.delete(path)
       }
+      return next
+    })
+  }, [])
+
+  const handleViewportEntry = useCallback((path: string) => {
+    if (viewportEnteredRef.current.has(path)) return
+    if (userToggledRef.current.has(path)) return
+
+    viewportEnteredRef.current.add(path)
+    setExpandedPaths(prev => {
+      if (prev.has(path)) return prev
+      const next = new Set(prev)
+      next.add(path)
       return next
     })
   }, [])
@@ -242,14 +261,65 @@ export const DiffList = memo(function DiffList({ files, diffStyle }: DiffListPro
         </Button>
       </div>
       {files.map((file) => (
-        <DiffViewer
+        <DiffWithViewportDetection
           key={file.path}
           file={file}
           diffStyle={diffStyle}
           expanded={expandedPaths.has(file.path)}
           onToggleExpanded={(expanded) => handleToggleFile(file.path, expanded)}
+          onViewportEntry={handleViewportEntry}
         />
       ))}
+    </div>
+  )
+})
+
+// Wrapper component that detects when a diff enters the viewport
+interface DiffWithViewportDetectionProps extends DiffViewerProps {
+  onViewportEntry: (path: string) => void
+}
+
+const DiffWithViewportDetection = memo(function DiffWithViewportDetection({
+  file,
+  diffStyle,
+  expanded,
+  onToggleExpanded,
+  onViewportEntry,
+}: DiffWithViewportDetectionProps) {
+  const itemRef = useRef<HTMLDivElement>(null)
+  const hasEnteredViewport = useRef(false)
+
+  useEffect(() => {
+    const element = itemRef.current
+    if (!element || hasEnteredViewport.current) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry.isIntersecting && !hasEnteredViewport.current) {
+          hasEnteredViewport.current = true
+          onViewportEntry(file.path)
+          observer.disconnect()
+        }
+      },
+      {
+        rootMargin: '100px 0px',
+        threshold: 0,
+      }
+    )
+
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [file.path, onViewportEntry])
+
+  return (
+    <div ref={itemRef}>
+      <DiffViewer
+        file={file}
+        diffStyle={diffStyle}
+        expanded={expanded}
+        onToggleExpanded={onToggleExpanded}
+      />
     </div>
   )
 })
