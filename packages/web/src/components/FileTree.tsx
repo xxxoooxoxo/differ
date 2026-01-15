@@ -4,7 +4,7 @@ import { ScrollArea } from './ui/scroll-area'
 
 interface FileDiffInfo {
   path: string
-  status: 'added' | 'deleted' | 'modified' | 'renamed'
+  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'untracked'
   additions: number
   deletions: number
 }
@@ -20,6 +20,7 @@ const statusColors = {
   deleted: 'bg-red-400',
   modified: 'bg-amber-400',
   renamed: 'bg-blue-400',
+  untracked: 'bg-purple-400',
 }
 
 export const FileTree = memo(function FileTree({ files, selectedFile, onSelectFile }: FileTreeProps) {

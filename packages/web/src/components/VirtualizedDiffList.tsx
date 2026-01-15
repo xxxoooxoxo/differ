@@ -7,7 +7,7 @@ import type { DiffStyle } from './Header'
 
 interface FileDiffInfo {
   path: string
-  status: 'added' | 'deleted' | 'modified' | 'renamed'
+  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'untracked'
   additions: number
   deletions: number
   oldContent?: string

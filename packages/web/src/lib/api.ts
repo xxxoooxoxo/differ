@@ -17,7 +17,7 @@ export interface DiffStats {
 export interface FileDiffInfo {
   path: string
   oldPath?: string
-  status: 'added' | 'deleted' | 'modified' | 'renamed'
+  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'untracked'
   additions: number
   deletions: number
   oldContent?: string

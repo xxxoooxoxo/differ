@@ -24,7 +24,7 @@ import { cn } from '../lib/utils'
 
 interface FileDiffInfo {
   path: string
-  status: 'added' | 'deleted' | 'modified' | 'renamed'
+  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'untracked'
   additions: number
   deletions: number
 }
@@ -43,6 +43,7 @@ const statusBadge: Record<string, { label: string; className: string }> = {
   deleted: { label: 'D', className: 'text-red-400' },
   modified: { label: 'M', className: 'text-amber-400' },
   renamed: { label: 'R', className: 'text-blue-400' },
+  untracked: { label: 'U', className: 'text-purple-400' },
 }
 
 // Build tree structure from flat file paths
@@ -50,7 +51,7 @@ interface TreeNode {
   name: string
   path: string
   isFile: boolean
-  status?: 'added' | 'deleted' | 'modified' | 'renamed'
+  status?: 'added' | 'deleted' | 'modified' | 'renamed' | 'untracked'
   additions?: number
   deletions?: number
   children: Map<string, TreeNode>

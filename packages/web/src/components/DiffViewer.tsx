@@ -9,7 +9,7 @@ import { cn } from '../lib/utils'
 
 interface FileDiffInfo {
   path: string
-  status: 'added' | 'deleted' | 'modified' | 'renamed'
+  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'untracked'
   additions: number
   deletions: number
   oldContent?: string
@@ -77,6 +77,7 @@ const DiffViewerInner = memo(function DiffViewerInner({
     deleted: 'Deleted',
     modified: 'Modified',
     renamed: 'Renamed',
+    untracked: 'Untracked',
   }
 
   // Use loaded patch for large files, otherwise use the file's patch
@@ -89,6 +90,7 @@ const DiffViewerInner = memo(function DiffViewerInner({
     deleted: 'bg-red-400',
     modified: 'bg-amber-400',
     renamed: 'bg-blue-400',
+    untracked: 'bg-purple-400',
   }
 
   return (

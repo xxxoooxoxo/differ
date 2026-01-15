@@ -21,11 +21,12 @@ function getFileStats(file: { binary?: boolean; insertions?: number; deletions?:
 
 export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
   // Get diff of working directory against HEAD
-  // Run diffSummary, name-status, and get repo root in parallel to reduce git calls
-  const [diffSummary, nameStatusRaw, repoRoot] = await Promise.all([
+  // Run diffSummary, name-status, get repo root, and untracked files in parallel
+  const [diffSummary, nameStatusRaw, repoRoot, untrackedRaw] = await Promise.all([
     git.diffSummary(['HEAD']),
     git.raw(['diff', '--name-status', 'HEAD']),
     git.revparse(['--show-toplevel']).then((r) => r.trim()),
+    git.raw(['ls-files', '--others', '--exclude-standard']),
   ])
 
   // Parse name-status output to get file statuses (A=added, D=deleted, M=modified, R=renamed)
@@ -70,6 +71,45 @@ export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
       patch,
       isLarge,
     })
+  }
+
+  // Process untracked files
+  const untrackedFiles = untrackedRaw.trim().split('\n').filter(Boolean)
+  const MAX_PATCH_SIZE = 50000
+
+  for (const filePath of untrackedFiles) {
+    try {
+      const fs = await import('fs/promises')
+      const fullPath = join(repoRoot, filePath)
+      const content = await fs.readFile(fullPath, 'utf-8')
+      const lines = content.split('\n')
+      const lineCount = lines.length
+
+      // Create a unified diff patch for the untracked file (all lines as additions)
+      const isLarge = content.length > MAX_PATCH_SIZE
+      let patch = ''
+      if (!isLarge) {
+        const patchLines = lines.map((line) => `+${line}`).join('\n')
+        patch = `diff --git a/${filePath} b/${filePath}
+new file mode 100644
+--- /dev/null
++++ b/${filePath}
+@@ -0,0 +1,${lineCount} @@
+${patchLines}`
+      }
+
+      totalAdditions += lineCount
+      files.push({
+        path: filePath,
+        status: 'untracked',
+        additions: lineCount,
+        deletions: 0,
+        patch,
+        isLarge,
+      })
+    } catch {
+      // Skip files we can't read (binary, permissions, etc.)
+    }
   }
 
   // Fetch file modification times in parallel (skip deleted files as they don't exist)

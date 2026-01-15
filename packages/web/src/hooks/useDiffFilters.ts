@@ -3,7 +3,7 @@ import type { FileDiffInfo } from '../lib/api'
 
 export type SortBy = 'modified' | 'name' | 'extension' | 'status' | 'changes'
 export type SortOrder = 'asc' | 'desc'
-export type FileStatus = 'added' | 'deleted' | 'modified' | 'renamed'
+export type FileStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'untracked'
 
 export interface DiffFilters {
   sortBy: SortBy
