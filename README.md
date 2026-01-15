@@ -1,29 +1,59 @@
-# Differ
+# differ
 
-A performant git diff viewer with a web UI.
+A local git diff viewer with syntax highlighting.
 
-## Features
+## Install
 
-- Split diff view using @pierre/diffs
-- Live reload on file changes
-- Commit history browser
-- Branch comparison
+```bash
+# Clone and build
+git clone https://github.com/xxxoooxoxo/differ.git
+cd differ
+bun install
+bun run build:cli
+
+# Link globally (optional)
+sudo ln -sf $(pwd)/dist/differ /usr/local/bin/differ
+```
 
 ## Usage
 
 ```bash
-differ                    # View diffs in current directory
-differ /path/to/repo      # View diffs in specific repo
-differ -p 3000            # Use specific port
-differ --no-open          # Don't open browser
+differ                    # current directory
+differ /path/to/repo      # specific repo
+differ -p 8080            # custom port
+differ --no-open          # don't open browser
 ```
+
+## Features
+
+- Split and unified diff views
+- Syntax highlighting via shiki
+- File tree and flat list navigation
+- Branch comparison
+- Commit history browser
+- Live reload on file changes
 
 ## Development
 
 ```bash
 bun install
-bun run dev        # Start Vite dev server
-bun run differ     # Start the CLI
+
+# Terminal 1: frontend
+bun run dev
+
+# Terminal 2: backend
+bun run differ ./
 ```
 
-Test
+Frontend runs on `localhost:5173`, proxies API calls to backend on `localhost:1738`.
+
+## Stack
+
+- Runtime: Bun
+- Backend: Hono
+- Frontend: React 19, Vite, shadcn/ui
+- Diff rendering: @pierre/diffs
+
+## License
+
+MIT
