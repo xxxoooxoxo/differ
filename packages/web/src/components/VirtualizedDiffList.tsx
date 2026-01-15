@@ -20,13 +20,17 @@ interface VirtualizedDiffListProps {
   files: FileDiffInfo[]
   diffStyle: DiffStyle
   scrollContainerRef: React.RefObject<HTMLElement | null>
+  focusedIndex?: number | null
 }
 
 export interface VirtualizedDiffListHandle {
   scrollToFile: (path: string) => void
+  scrollToIndex: (index: number) => void
   expandAll: () => void
   collapseAll: () => void
   isAllExpanded: () => boolean
+  isExpanded: (path: string) => boolean
+  toggleFile: (path: string, expanded: boolean) => void
 }
 
 function estimateItemHeight(file: FileDiffInfo, expanded: boolean): number {
@@ -40,6 +44,7 @@ interface DiffItemWrapperProps {
   file: FileDiffInfo
   diffStyle: DiffStyle
   isExpanded: boolean
+  isFocused: boolean
   virtualItem: { index: number; start: number }
   measureElement: (node: HTMLElement | null) => void
   onToggleExpanded: (path: string, expanded: boolean) => void
@@ -51,6 +56,7 @@ const DiffItemWrapper = memo(function DiffItemWrapper({
   file,
   diffStyle,
   isExpanded,
+  isFocused,
   virtualItem,
   measureElement,
   onToggleExpanded,
@@ -109,6 +115,7 @@ const DiffItemWrapper = memo(function DiffItemWrapper({
         file={file}
         diffStyle={diffStyle}
         expanded={isExpanded}
+        isFocused={isFocused}
         onToggleExpanded={(expanded) => onToggleExpanded(file.path, expanded)}
       />
     </div>
@@ -119,13 +126,14 @@ const DiffItemWrapper = memo(function DiffItemWrapper({
     prevProps.file.patch === nextProps.file.patch &&
     prevProps.file.status === nextProps.file.status &&
     prevProps.isExpanded === nextProps.isExpanded &&
+    prevProps.isFocused === nextProps.isFocused &&
     prevProps.diffStyle === nextProps.diffStyle &&
     prevProps.virtualItem.start === nextProps.virtualItem.start
   )
 })
 
 export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, VirtualizedDiffListProps>(
-  function VirtualizedDiffList({ files, diffStyle, scrollContainerRef }, ref) {
+  function VirtualizedDiffList({ files, diffStyle, scrollContainerRef, focusedIndex }, ref) {
     const pathToIndex = useRef<Map<string, number>>(new Map())
     // Track which files are expanded (default: collapsed)
     const [expandedState, setExpandedState] = useState<Map<string, boolean>>(() => new Map())
@@ -191,6 +199,22 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
       })
     }, [])
 
+    const handleToggleExpanded = useCallback((path: string, expanded: boolean) => {
+      // Mark as user-toggled to prevent auto-expand from overriding
+      userToggledRef.current.add(path)
+      setExpandedState(prev => {
+        const next = new Map(prev)
+        next.set(path, expanded)
+        return next
+      })
+    }, [])
+
+    const measureElement = useCallback((node: HTMLElement | null) => {
+      if (node) {
+        virtualizer.measureElement(node)
+      }
+    }, [virtualizer])
+
     useImperativeHandle(ref, () => ({
       scrollToFile: (path: string) => {
         const index = pathToIndex.current.get(path)
@@ -201,26 +225,20 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
           })
         }
       },
+      scrollToIndex: (index: number) => {
+        if (index >= 0 && index < files.length) {
+          virtualizer.scrollToIndex(index, {
+            align: 'start',
+            behavior: 'smooth',
+          })
+        }
+      },
       expandAll,
       collapseAll,
       isAllExpanded,
-    }), [virtualizer, expandAll, collapseAll, isAllExpanded])
-
-    const measureElement = useCallback((node: HTMLElement | null) => {
-      if (node) {
-        virtualizer.measureElement(node)
-      }
-    }, [virtualizer])
-
-    const handleToggleExpanded = useCallback((path: string, expanded: boolean) => {
-      // Mark as user-toggled to prevent auto-expand from overriding
-      userToggledRef.current.add(path)
-      setExpandedState(prev => {
-        const next = new Map(prev)
-        next.set(path, expanded)
-        return next
-      })
-    }, [])
+      isExpanded: getIsExpanded,
+      toggleFile: handleToggleExpanded,
+    }), [virtualizer, files.length, expandAll, collapseAll, isAllExpanded, getIsExpanded, handleToggleExpanded])
 
     if (files.length === 0) {
       return (
@@ -273,6 +291,7 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
                 file={file}
                 diffStyle={diffStyle}
                 isExpanded={isExpanded}
+                isFocused={focusedIndex === virtualItem.index}
                 virtualItem={virtualItem}
                 measureElement={measureElement}
                 onToggleExpanded={handleToggleExpanded}

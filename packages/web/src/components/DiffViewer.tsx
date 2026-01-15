@@ -23,6 +23,7 @@ interface DiffViewerProps {
   diffStyle: DiffStyle
   defaultExpanded?: boolean
   expanded?: boolean
+  isFocused?: boolean
   onToggleExpanded?: (expanded: boolean) => void
 }
 
@@ -31,6 +32,7 @@ const DiffViewerInner = memo(function DiffViewerInner({
   diffStyle,
   defaultExpanded = true,
   expanded: controlledExpanded,
+  isFocused = false,
   onToggleExpanded
 }: DiffViewerProps) {
   const [internalExpanded, setInternalExpanded] = useState(defaultExpanded)
@@ -90,7 +92,15 @@ const DiffViewerInner = memo(function DiffViewerInner({
   }
 
   return (
-    <div className="overflow-hidden rounded-md border border-border bg-card" id={`diff-${file.path}`}>
+    <div
+      className={cn(
+        "overflow-hidden rounded-md border bg-card transition-colors",
+        isFocused
+          ? "border-blue-500 ring-1 ring-blue-500/50"
+          : "border-border"
+      )}
+      id={`diff-${file.path}`}
+    >
       <div
         className="flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors hover:bg-accent/30"
         onClick={handleToggle}
@@ -180,7 +190,8 @@ const DiffViewerInner = memo(function DiffViewerInner({
     prevProps.file.deletions === nextProps.file.deletions &&
     prevProps.file.isLarge === nextProps.file.isLarge &&
     prevProps.diffStyle === nextProps.diffStyle &&
-    prevProps.expanded === nextProps.expanded
+    prevProps.expanded === nextProps.expanded &&
+    prevProps.isFocused === nextProps.isFocused
   )
 })
 

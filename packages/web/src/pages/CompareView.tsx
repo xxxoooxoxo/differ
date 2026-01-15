@@ -1,16 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useBranches, useCompareBranches } from '../hooks/useBranches'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useVimNavigation } from '../hooks/useVimNavigation'
+import { useEditor } from '../hooks/useEditor'
 import { HeaderContent, type DiffStyle } from '../components/Header'
 import { BranchSelector } from '../components/BranchSelector'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
 import { Separator } from '../components/ui/separator'
-import { SidebarHeader } from '../components/ui/sidebar'
 
 export function CompareView() {
   const { data: branchData, loading: branchesLoading } = useBranches()
   const { isConnected } = useWebSocket()
+  const { openInEditor } = useEditor()
 
   const [baseBranch, setBaseBranch] = useState<string>('')
   const [headBranch, setHeadBranch] = useState<string>('')
@@ -40,6 +42,16 @@ export function CompareView() {
 
   const branches = branchData?.branches || []
   const files = compareData?.files || []
+
+  const { focusedIndex } = useVimNavigation({
+    files,
+    isExpanded: (path) => diffListRef.current?.isExpanded(path) ?? false,
+    onToggleExpanded: (path, expanded) => diffListRef.current?.toggleFile(path, expanded),
+    onExpandAll: () => diffListRef.current?.expandAll(),
+    onCollapseAll: () => diffListRef.current?.collapseAll(),
+    scrollToIndex: (index) => diffListRef.current?.scrollToIndex(index),
+    openInEditor,
+  })
 
   const headerContent = (
     <div className="p-3 space-y-2">
@@ -117,6 +129,7 @@ export function CompareView() {
                   files={files}
                   diffStyle={diffStyle}
                   scrollContainerRef={contentRef}
+                  focusedIndex={focusedIndex}
                 />
               </>
             )}

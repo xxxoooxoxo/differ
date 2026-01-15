@@ -2,6 +2,8 @@ import { useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useCommitDiff } from '../hooks/useGitDiff'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useVimNavigation } from '../hooks/useVimNavigation'
+import { useEditor } from '../hooks/useEditor'
 import { HeaderContent, type DiffStyle } from '../components/Header'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
@@ -12,19 +14,30 @@ export function CommitView() {
   const { sha } = useParams<{ sha: string }>()
   const { data, loading, error } = useCommitDiff(sha || null)
   const { isConnected } = useWebSocket()
+  const { openInEditor } = useEditor()
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [diffStyle, setDiffStyle] = useState<DiffStyle>('split')
 
   const contentRef = useRef<HTMLElement>(null)
   const diffListRef = useRef<VirtualizedDiffListHandle>(null)
 
+  const commit = data?.commit
+  const files = data?.files || []
+
+  const { focusedIndex } = useVimNavigation({
+    files,
+    isExpanded: (path) => diffListRef.current?.isExpanded(path) ?? false,
+    onToggleExpanded: (path, expanded) => diffListRef.current?.toggleFile(path, expanded),
+    onExpandAll: () => diffListRef.current?.expandAll(),
+    onCollapseAll: () => diffListRef.current?.collapseAll(),
+    scrollToIndex: (index) => diffListRef.current?.scrollToIndex(index),
+    openInEditor,
+  })
+
   const handleSelectFile = useCallback((path: string) => {
     setSelectedFile(path)
     diffListRef.current?.scrollToFile(path)
   }, [])
-
-  const commit = data?.commit
-  const files = data?.files || []
 
   const headerContent = (
     <Link
@@ -105,6 +118,7 @@ export function CommitView() {
                   files={files}
                   diffStyle={diffStyle}
                   scrollContainerRef={contentRef}
+                  focusedIndex={focusedIndex}
                 />
               </>
             ) : null}

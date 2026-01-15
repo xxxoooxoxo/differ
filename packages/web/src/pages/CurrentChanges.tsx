@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
 import { useGitDiff } from '../hooks/useGitDiff'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useVimNavigation } from '../hooks/useVimNavigation'
+import { useEditor } from '../hooks/useEditor'
 import { HeaderContent, type DiffStyle } from '../components/Header'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
@@ -12,9 +14,22 @@ export function CurrentChanges() {
   const [diffStyle, setDiffStyle] = useState<DiffStyle>('split')
 
   const { isConnected } = useWebSocket(refetch)
+  const { openInEditor } = useEditor()
 
   const contentRef = useRef<HTMLElement>(null)
   const diffListRef = useRef<VirtualizedDiffListHandle>(null)
+
+  const files = data?.files || []
+
+  const { focusedIndex } = useVimNavigation({
+    files,
+    isExpanded: (path) => diffListRef.current?.isExpanded(path) ?? false,
+    onToggleExpanded: (path, expanded) => diffListRef.current?.toggleFile(path, expanded),
+    onExpandAll: () => diffListRef.current?.expandAll(),
+    onCollapseAll: () => diffListRef.current?.collapseAll(),
+    scrollToIndex: (index) => diffListRef.current?.scrollToIndex(index),
+    openInEditor,
+  })
 
   const handleSelectFile = useCallback((path: string) => {
     setSelectedFile(path)
@@ -76,9 +91,10 @@ export function CurrentChanges() {
             ) : (
               <VirtualizedDiffList
                 ref={diffListRef}
-                files={data?.files || []}
+                files={files}
                 diffStyle={diffStyle}
                 scrollContainerRef={contentRef}
+                focusedIndex={focusedIndex}
               />
             )}
           </div>
