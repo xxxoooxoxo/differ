@@ -1,0 +1,12 @@
+{
+  "name": "@differ/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "differ": "./src/index.ts"
+  },
+  "dependencies": {
+    "@differ/server": "workspace:*",
+    "open": "^10.1.0"
+  }
+}

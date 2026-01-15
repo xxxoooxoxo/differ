@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "types": ["node", "bun-types"]
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../server" }
+  ]
+}
