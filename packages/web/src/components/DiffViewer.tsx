@@ -4,8 +4,17 @@ import type { DiffStyle } from './Header'
 import { useEditor } from '../hooks/useEditor'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
-import { ExternalLink, Package, ChevronsUpDown } from 'lucide-react'
+import { ExternalLink, Package, ChevronsUpDown, Code, Eye } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { MarkdownPreview } from './MarkdownPreview'
+
+type ViewMode = 'diff' | 'preview'
+
+const MARKDOWN_EXTENSIONS = ['.md', '.mdx', '.markdown']
+
+function isMarkdownFile(path: string): boolean {
+  return MARKDOWN_EXTENSIONS.some(ext => path.toLowerCase().endsWith(ext))
+}
 
 interface FileDiffInfo {
   path: string
@@ -53,9 +62,49 @@ const DiffViewerInner = memo(function DiffViewerInner({
   const [loading, setLoading] = useState(false)
   const { openInEditor } = useEditor()
 
+  // Markdown preview state
+  const isMarkdown = isMarkdownFile(file.path)
+  const [viewMode, setViewMode] = useState<ViewMode>('diff')
+  const [markdownContent, setMarkdownContent] = useState<{ current: string; previous: string } | null>(null)
+  const [loadingMarkdown, setLoadingMarkdown] = useState(false)
+
   useEffect(() => {
     startTransition(() => setReady(true))
   }, [])
+
+  // Load markdown content when switching to preview mode
+  const loadMarkdownContent = async () => {
+    if (markdownContent) return // Already loaded
+    setLoadingMarkdown(true)
+    try {
+      // Load both current (working dir) and previous (HEAD) versions in parallel
+      const [currentRes, previousRes] = await Promise.all([
+        fetch(`/api/diff/file-content?path=${encodeURIComponent(file.path)}`),
+        file.status !== 'added' && file.status !== 'untracked'
+          ? fetch(`/api/diff/file-content?path=${encodeURIComponent(file.path)}&ref=HEAD`)
+          : Promise.resolve(null)
+      ])
+
+      const currentData = await currentRes.json()
+      const previousData = previousRes ? await previousRes.json() : null
+
+      setMarkdownContent({
+        current: currentData.content || '',
+        previous: previousData?.content || ''
+      })
+    } catch (error) {
+      console.error('Failed to load markdown content:', error)
+    } finally {
+      setLoadingMarkdown(false)
+    }
+  }
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode)
+    if (mode === 'preview' && !markdownContent) {
+      loadMarkdownContent()
+    }
+  }
 
   const loadLargeDiff = async () => {
     setLoading(true)
@@ -121,6 +170,30 @@ const DiffViewerInner = memo(function DiffViewerInner({
               Large
             </Badge>
           )}
+          {isMarkdown && (
+            <div className="flex items-center rounded border border-border overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <button
+                className={cn(
+                  "px-1.5 py-0.5 text-[10px] flex items-center gap-1 transition-colors",
+                  viewMode === 'diff' ? "bg-accent text-foreground" : "hover:bg-accent/50"
+                )}
+                title="View diff"
+                onClick={() => handleViewModeChange('diff')}
+              >
+                <Code className="size-3" />
+              </button>
+              <button
+                className={cn(
+                  "px-1.5 py-0.5 text-[10px] flex items-center gap-1 transition-colors",
+                  viewMode === 'preview' ? "bg-accent text-foreground" : "hover:bg-accent/50"
+                )}
+                title="Preview markdown"
+                onClick={() => handleViewModeChange('preview')}
+              >
+                <Eye className="size-3" />
+              </button>
+            </div>
+          )}
           <button
             className="p-1 rounded hover:bg-accent/50 transition-colors"
             title="Open in editor"
@@ -139,7 +212,39 @@ const DiffViewerInner = memo(function DiffViewerInner({
 
       {expanded && ready && (
         <div className="overflow-x-auto">
-          {showLargeFileMessage ? (
+          {isMarkdown && viewMode === 'preview' ? (
+            // Markdown preview mode
+            loadingMarkdown ? (
+              <div className="flex items-center justify-center py-8">
+                <p className="text-[13px] text-muted-foreground">Loading preview...</p>
+              </div>
+            ) : markdownContent ? (
+              <div className="flex">
+                {/* Show previous version if file was modified (not new) */}
+                {markdownContent.previous && file.status !== 'added' && file.status !== 'untracked' && (
+                  <div className="flex-1 border-r border-border">
+                    <div className="px-3 py-1.5 bg-muted/50 border-b border-border">
+                      <span className="text-[11px] font-medium text-muted-foreground">Previous (HEAD)</span>
+                    </div>
+                    <MarkdownPreview content={markdownContent.previous} />
+                  </div>
+                )}
+                {/* Current version */}
+                <div className="flex-1">
+                  {markdownContent.previous && file.status !== 'added' && file.status !== 'untracked' && (
+                    <div className="px-3 py-1.5 bg-muted/50 border-b border-border">
+                      <span className="text-[11px] font-medium text-muted-foreground">Current</span>
+                    </div>
+                  )}
+                  <MarkdownPreview content={markdownContent.current} />
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <p className="text-[13px] text-muted-foreground">Failed to load preview</p>
+              </div>
+            )
+          ) : showLargeFileMessage ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Package className="mb-4 size-8 text-muted-foreground" />
               <p className="text-[13px] text-muted-foreground">
