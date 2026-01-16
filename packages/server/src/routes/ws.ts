@@ -1,5 +1,6 @@
 import { watch, type FSWatcher } from 'fs'
 import { join } from 'path'
+import { invalidateCache } from '../git'
 
 export interface FileWatcher {
   watcher: FSWatcher
@@ -34,6 +35,9 @@ export function createFileWatcher(repoPath: string): FileWatcher {
     }
 
     debounceTimeout = setTimeout(() => {
+      // Invalidate git operation cache on file changes
+      invalidateCache('current-diff')
+
       broadcast(JSON.stringify({
         type: 'change',
         event,

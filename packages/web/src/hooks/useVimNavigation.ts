@@ -27,7 +27,23 @@ interface VimNavigationOptions {
 interface VimNavigationState {
   focusedIndex: number | null
   focusedHunkIndex: number | null
+  focusedLineIndex: number | null
   isActive: boolean
+}
+
+/**
+ * Get the shadow root of the diffs-container element for a file.
+ * @pierre/diffs uses Web Components with Shadow DOM, so we need to access
+ * the shadow root to query diff lines and hunks.
+ */
+function getDiffsShadowRoot(filePath: string): ShadowRoot | null {
+  const container = document.getElementById(`diff-${CSS.escape(filePath)}`)
+  if (!container) return null
+
+  const diffsContainer = container.querySelector('diffs-container')
+  if (!diffsContainer || !diffsContainer.shadowRoot) return null
+
+  return diffsContainer.shadowRoot
 }
 
 /**
@@ -35,17 +51,17 @@ interface VimNavigationState {
  * Tries multiple selectors to be compatible with different @pierre/diffs versions.
  */
 function getHunkElements(filePath: string): HTMLElement[] {
-  const container = document.getElementById(`diff-${CSS.escape(filePath)}`)
-  if (!container) return []
+  const shadowRoot = getDiffsShadowRoot(filePath)
+  if (!shadowRoot) return []
 
   // Try the data-separator attribute first (standard @pierre/diffs)
-  let hunks = container.querySelectorAll('[data-separator="line-info"]')
+  let hunks = shadowRoot.querySelectorAll('[data-separator="line-info"]')
   if (hunks.length > 0) {
     return Array.from(hunks) as HTMLElement[]
   }
 
   // Fallback: look for elements containing @@ hunk header pattern
-  const candidates = container.querySelectorAll('div, span, td')
+  const candidates = shadowRoot.querySelectorAll('div, span, td')
   const hunkElements: HTMLElement[] = []
   candidates.forEach((el) => {
     const text = el.textContent?.trim() || ''
@@ -56,6 +72,88 @@ function getHunkElements(filePath: string): HTMLElement[] {
   })
 
   return hunkElements
+}
+
+/**
+ * Get all diff lines for a file using [data-line][data-line-type] selector.
+ * Queries the Shadow DOM of the diffs-container element.
+ */
+function getAllDiffLines(filePath: string): HTMLElement[] {
+  const shadowRoot = getDiffsShadowRoot(filePath)
+  if (!shadowRoot) return []
+
+  // Get all elements with data-line attribute that also have a data-line-type
+  const lines = shadowRoot.querySelectorAll('[data-line][data-line-type]')
+  return Array.from(lines) as HTMLElement[]
+}
+
+/**
+ * Determine which hunk a line belongs to by finding the nearest preceding hunk header
+ */
+function getHunkIndexForLine(
+  lineElement: HTMLElement,
+  filePath: string
+): number | null {
+  const hunks = getHunkElements(filePath)
+  if (hunks.length === 0) return null
+
+  // Find the hunk that precedes this line in the DOM
+  for (let i = hunks.length - 1; i >= 0; i--) {
+    const hunk = hunks[i]
+    // Check if the hunk comes before the line in DOM order
+    if (
+      hunk.compareDocumentPosition(lineElement) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+    ) {
+      return i
+    }
+  }
+
+  return 0 // Default to first hunk if no preceding hunk found
+}
+
+/**
+ * Get lines belonging to a specific hunk
+ */
+function getLinesInHunk(filePath: string, hunkIndex: number): HTMLElement[] {
+  const allLines = getAllDiffLines(filePath)
+  const hunks = getHunkElements(filePath)
+
+  if (hunks.length === 0) return allLines
+  if (hunkIndex < 0 || hunkIndex >= hunks.length) return []
+
+  const hunkStart = hunks[hunkIndex]
+  const hunkEnd = hunks[hunkIndex + 1] // undefined if last hunk
+
+  return allLines.filter((line) => {
+    // Line must come after the hunk header
+    const afterStart =
+      hunkStart.compareDocumentPosition(line) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+
+    // Line must come before the next hunk header (or be at end)
+    const beforeEnd =
+      !hunkEnd ||
+      hunkEnd.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_PRECEDING
+
+    return afterStart && beforeEnd
+  })
+}
+
+/**
+ * Get the first line index of a hunk
+ */
+function getFirstLineIndexOfHunk(
+  filePath: string,
+  hunkIndex: number
+): number | null {
+  const allLines = getAllDiffLines(filePath)
+  const hunkLines = getLinesInHunk(filePath, hunkIndex)
+
+  if (hunkLines.length === 0) return null
+
+  const firstHunkLine = hunkLines[0]
+  return allLines.indexOf(firstHunkLine)
 }
 
 /**
@@ -76,8 +174,10 @@ function scrollElementIntoView(
   const containerRect = scrollContainer.getBoundingClientRect()
 
   // Calculate scroll position to center the element
-  const elementOffsetTop = elementRect.top - containerRect.top + scrollContainer.scrollTop
-  const centeredScrollTop = elementOffsetTop - containerRect.height / 2 + elementRect.height / 2
+  const elementOffsetTop =
+    elementRect.top - containerRect.top + scrollContainer.scrollTop
+  const centeredScrollTop =
+    elementOffsetTop - containerRect.height / 2 + elementRect.height / 2
 
   scrollContainer.scrollTo({
     top: Math.max(0, centeredScrollTop),
@@ -115,10 +215,60 @@ function scrollToHunk(
 }
 
 /**
+ * Scroll a line into view
+ */
+function scrollToLine(
+  filePath: string,
+  lineIndex: number,
+  scrollContainer: HTMLElement | null
+) {
+  requestAnimationFrame(() => {
+    const lines = getAllDiffLines(filePath)
+    const line = lines[lineIndex]
+    if (line) {
+      scrollElementIntoView(line, scrollContainer)
+    }
+  })
+}
+
+/**
+ * Clear a CSS class from all diffs-container shadow roots.
+ * Since @pierre/diffs uses Shadow DOM, document.querySelectorAll won't find
+ * elements inside shadow roots, so we need to iterate through all of them.
+ */
+function clearClassFromAllShadowRoots(className: string) {
+  document.querySelectorAll('diffs-container').forEach((container) => {
+    const shadowRoot = container.shadowRoot
+    if (shadowRoot) {
+      shadowRoot.querySelectorAll(`.${className}`).forEach((el) => {
+        el.classList.remove(className)
+      })
+    }
+  })
+}
+
+/**
+ * Apply line focus styling
+ */
+function applyLineFocus(element: HTMLElement | null) {
+  // Clear all existing line focus from shadow DOMs
+  clearClassFromAllShadowRoots('line-focused')
+
+  // Apply new focus
+  if (element) {
+    element.classList.add('line-focused')
+  }
+}
+
+/**
  * Vim-style keyboard navigation for diff viewer
  *
- * Keybindings:
- * - j/k: Navigate between files (collapsed) or hunks (expanded)
+ * Three-tier navigation:
+ * - j/k: Navigate lines (finest granularity)
+ * - {/}: Jump between hunks (medium granularity)
+ * - [[/]]: Jump between files (coarsest granularity)
+ *
+ * Other keybindings:
  * - h: Collapse focused file
  * - l: Expand focused file
  * - Enter/Space: Toggle expand/collapse
@@ -141,6 +291,7 @@ export function useVimNavigation({
 } {
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null)
   const [focusedHunkIndex, setFocusedHunkIndex] = useState<number | null>(null)
+  const [focusedLineIndex, setFocusedLineIndex] = useState<number | null>(null)
   const [isActive, setIsActive] = useState(false)
   const lastKeyRef = useRef<string | null>(null)
   const lastKeyTimeRef = useRef<number>(0)
@@ -150,28 +301,47 @@ export function useVimNavigation({
     if (focusedIndex !== null && focusedIndex >= files.length) {
       setFocusedIndex(files.length > 0 ? files.length - 1 : null)
       setFocusedHunkIndex(null)
+      setFocusedLineIndex(null)
     }
   }, [files.length, focusedIndex])
 
-  // Reset hunk focus when file focus changes
+  // Reset hunk and line focus when file focus changes
   useEffect(() => {
     setFocusedHunkIndex(null)
+    setFocusedLineIndex(null)
   }, [focusedIndex])
 
   // Manage hunk highlight class
   useEffect(() => {
-    // Clear all highlights
-    document.querySelectorAll('.hunk-focused').forEach(el => {
-      el.classList.remove('hunk-focused')
-    })
+    // Clear all hunk highlights from shadow DOMs
+    clearClassFromAllShadowRoots('hunk-focused')
 
-    // Apply new highlight
-    if (focusedIndex !== null && focusedHunkIndex !== null && focusedIndex < files.length) {
+    // Apply new hunk highlight
+    if (
+      focusedIndex !== null &&
+      focusedHunkIndex !== null &&
+      focusedIndex < files.length
+    ) {
       const file = files[focusedIndex]
       const hunks = getHunkElements(file.path)
       hunks[focusedHunkIndex]?.classList.add('hunk-focused')
     }
   }, [focusedIndex, focusedHunkIndex, files])
+
+  // Manage line highlight
+  useEffect(() => {
+    if (
+      focusedIndex !== null &&
+      focusedLineIndex !== null &&
+      focusedIndex < files.length
+    ) {
+      const file = files[focusedIndex]
+      const lines = getAllDiffLines(file.path)
+      applyLineFocus(lines[focusedLineIndex] || null)
+    } else {
+      applyLineFocus(null)
+    }
+  }, [focusedIndex, focusedLineIndex, files])
 
   const activate = useCallback(() => {
     setIsActive(true)
@@ -185,254 +355,541 @@ export function useVimNavigation({
     setIsActive(false)
     setFocusedIndex(null)
     setFocusedHunkIndex(null)
+    setFocusedLineIndex(null)
+    applyLineFocus(null)
   }, [])
 
-  const navigateToFile = useCallback((index: number) => {
-    if (index >= 0 && index < files.length) {
+  const navigateToFile = useCallback(
+    (index: number) => {
+      if (index >= 0 && index < files.length) {
+        setFocusedIndex(index)
+        setFocusedHunkIndex(null)
+        setFocusedLineIndex(null)
+        diffListRef.current?.scrollToIndex(index)
+      }
+    },
+    [files.length, diffListRef]
+  )
+
+  /**
+   * Navigate to a file and focus its first line (expanding if needed)
+   */
+  const navigateToFileWithFirstLine = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= files.length) return
+
+      const file = files[index]
       setFocusedIndex(index)
-      setFocusedHunkIndex(null)
       diffListRef.current?.scrollToIndex(index)
-    }
-  }, [files.length, diffListRef])
 
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Ignore if typing in an input
-    const target = e.target as HTMLElement
-    if (
-      target.tagName === 'INPUT' ||
-      target.tagName === 'TEXTAREA' ||
-      target.isContentEditable
-    ) {
-      return
-    }
-
-    const now = Date.now()
-    const timeSinceLastKey = now - lastKeyTimeRef.current
-    const key = e.key
-
-    // Handle multi-key sequences (gg) - 500ms timeout
-    if (timeSinceLastKey > 500) {
-      lastKeyRef.current = null
-    }
-
-    // Auto-activate on first navigation key if not active
-    if (!isActive && (key === 'j' || key === 'k')) {
-      activate()
-    }
-
-    switch (key) {
-      case 'j': {
-        e.preventDefault()
-        if (focusedIndex === null) {
-          navigateToFile(0)
-          return
-        }
-
-        const file = files[focusedIndex]
-        const expanded = diffListRef.current?.isExpanded(file.path)
-
-        if (!expanded) {
-          // File collapsed → next file
-          navigateToFile(focusedIndex + 1)
-        } else {
-          // File expanded → navigate hunks
-          const hunks = getHunkElements(file.path)
-          const hunkCount = hunks.length
-
-          if (hunkCount === 0) {
-            // No hunks → next file
-            navigateToFile(focusedIndex + 1)
-          } else if (focusedHunkIndex === null) {
-            // Not in hunk mode → focus first hunk
-            setFocusedHunkIndex(0)
-            scrollToHunk(file.path, 0, scrollContainerRef.current)
-          } else if (focusedHunkIndex < hunkCount - 1) {
-            // Move to next hunk
-            const nextHunk = focusedHunkIndex + 1
-            setFocusedHunkIndex(nextHunk)
-            scrollToHunk(file.path, nextHunk, scrollContainerRef.current)
-          } else {
-            // At last hunk → next file
-            navigateToFile(focusedIndex + 1)
-          }
-        }
-        break
+      // Expand the file if collapsed
+      if (!diffListRef.current?.isExpanded(file.path)) {
+        diffListRef.current?.toggleFile(file.path, true)
       }
 
-      case 'k': {
-        e.preventDefault()
-        if (focusedIndex === null) {
-          navigateToFile(files.length - 1)
-          return
+      // Wait for DOM to render, then focus first line
+      setTimeout(() => {
+        const lines = getAllDiffLines(file.path)
+        if (lines.length > 0) {
+          setFocusedLineIndex(0)
+          // Update hunk index based on line position
+          const hunkIdx = getHunkIndexForLine(lines[0], file.path)
+          setFocusedHunkIndex(hunkIdx)
+          scrollToLine(file.path, 0, scrollContainerRef.current)
+        } else {
+          // No lines (empty file), just focus the file
+          setFocusedLineIndex(null)
+          setFocusedHunkIndex(null)
+        }
+      }, 50)
+    },
+    [files, diffListRef, scrollContainerRef]
+  )
+
+  /**
+   * Navigate to a file and focus its last line
+   */
+  const navigateToFileWithLastLine = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= files.length) return
+
+      const file = files[index]
+      setFocusedIndex(index)
+      diffListRef.current?.scrollToIndex(index)
+
+      // Expand the file if collapsed
+      if (!diffListRef.current?.isExpanded(file.path)) {
+        diffListRef.current?.toggleFile(file.path, true)
+      }
+
+      // Wait for DOM to render, then focus last line
+      setTimeout(() => {
+        const lines = getAllDiffLines(file.path)
+        if (lines.length > 0) {
+          const lastIdx = lines.length - 1
+          setFocusedLineIndex(lastIdx)
+          // Update hunk index based on line position
+          const hunkIdx = getHunkIndexForLine(lines[lastIdx], file.path)
+          setFocusedHunkIndex(hunkIdx)
+          scrollToLine(file.path, lastIdx, scrollContainerRef.current)
+        } else {
+          setFocusedLineIndex(null)
+          setFocusedHunkIndex(null)
+        }
+      }, 50)
+    },
+    [files, diffListRef, scrollContainerRef]
+  )
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      // Ignore if typing in an input
+      const target = e.target as HTMLElement
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
+        return
+      }
+
+      const now = Date.now()
+      const timeSinceLastKey = now - lastKeyTimeRef.current
+      const key = e.key
+
+      // Handle multi-key sequences (gg, [[, ]]) - 500ms timeout
+      if (timeSinceLastKey > 500) {
+        lastKeyRef.current = null
+      }
+
+      // Auto-activate on first navigation key if not active
+      if (!isActive && (key === 'j' || key === 'k' || key === '{' || key === '}')) {
+        activate()
+      }
+
+      switch (key) {
+        // LINE NAVIGATION (j/k)
+        case 'j': {
+          e.preventDefault()
+          if (focusedIndex === null) {
+            navigateToFileWithFirstLine(0)
+            return
+          }
+
+          const file = files[focusedIndex]
+          const expanded = diffListRef.current?.isExpanded(file.path)
+
+          if (!expanded) {
+            // File collapsed → expand and focus first line
+            diffListRef.current?.toggleFile(file.path, true)
+            setTimeout(() => {
+              const lines = getAllDiffLines(file.path)
+              if (lines.length > 0) {
+                setFocusedLineIndex(0)
+                const hunkIdx = getHunkIndexForLine(lines[0], file.path)
+                setFocusedHunkIndex(hunkIdx)
+                scrollToLine(file.path, 0, scrollContainerRef.current)
+              }
+            }, 50)
+            return
+          }
+
+          const lines = getAllDiffLines(file.path)
+          if (lines.length === 0) {
+            // No lines → next file
+            navigateToFileWithFirstLine(focusedIndex + 1)
+            return
+          }
+
+          if (focusedLineIndex === null) {
+            // Not in line mode → focus first line
+            setFocusedLineIndex(0)
+            const hunkIdx = getHunkIndexForLine(lines[0], file.path)
+            setFocusedHunkIndex(hunkIdx)
+            scrollToLine(file.path, 0, scrollContainerRef.current)
+          } else if (focusedLineIndex < lines.length - 1) {
+            // Move to next line
+            const nextLine = focusedLineIndex + 1
+            setFocusedLineIndex(nextLine)
+            // Update hunk index based on new line position
+            const hunkIdx = getHunkIndexForLine(lines[nextLine], file.path)
+            setFocusedHunkIndex(hunkIdx)
+            scrollToLine(file.path, nextLine, scrollContainerRef.current)
+          } else {
+            // At last line → next file's first line
+            navigateToFileWithFirstLine(focusedIndex + 1)
+          }
+          break
         }
 
-        const file = files[focusedIndex]
-        const expanded = diffListRef.current?.isExpanded(file.path)
+        case 'k': {
+          e.preventDefault()
+          if (focusedIndex === null) {
+            navigateToFileWithLastLine(files.length - 1)
+            return
+          }
 
-        if (!expanded) {
-          // File collapsed → prev file
-          navigateToFile(focusedIndex - 1)
-        } else {
-          // File expanded → navigate hunks
-          const hunks = getHunkElements(file.path)
-          const hunkCount = hunks.length
+          const file = files[focusedIndex]
+          const expanded = diffListRef.current?.isExpanded(file.path)
 
-          if (hunkCount === 0) {
-            // No hunks → prev file
-            navigateToFile(focusedIndex - 1)
-          } else if (focusedHunkIndex === null) {
-            // Not in hunk mode → focus last hunk
-            const lastHunk = hunkCount - 1
-            setFocusedHunkIndex(lastHunk)
-            scrollToHunk(file.path, lastHunk, scrollContainerRef.current)
-          } else if (focusedHunkIndex > 0) {
-            // Move to prev hunk
-            const prevHunk = focusedHunkIndex - 1
-            setFocusedHunkIndex(prevHunk)
-            scrollToHunk(file.path, prevHunk, scrollContainerRef.current)
+          if (!expanded) {
+            // File collapsed → go to previous file's last line
+            navigateToFileWithLastLine(focusedIndex - 1)
+            return
+          }
+
+          const lines = getAllDiffLines(file.path)
+          if (lines.length === 0) {
+            // No lines → prev file
+            navigateToFileWithLastLine(focusedIndex - 1)
+            return
+          }
+
+          if (focusedLineIndex === null) {
+            // Not in line mode → focus last line
+            const lastIdx = lines.length - 1
+            setFocusedLineIndex(lastIdx)
+            const hunkIdx = getHunkIndexForLine(lines[lastIdx], file.path)
+            setFocusedHunkIndex(hunkIdx)
+            scrollToLine(file.path, lastIdx, scrollContainerRef.current)
+          } else if (focusedLineIndex > 0) {
+            // Move to prev line
+            const prevLine = focusedLineIndex - 1
+            setFocusedLineIndex(prevLine)
+            const hunkIdx = getHunkIndexForLine(lines[prevLine], file.path)
+            setFocusedHunkIndex(hunkIdx)
+            scrollToLine(file.path, prevLine, scrollContainerRef.current)
           } else {
-            // At first hunk → prev file, focus its last hunk
-            if (focusedIndex > 0) {
-              const prevFileIndex = focusedIndex - 1
-              const prevFile = files[prevFileIndex]
-              setFocusedIndex(prevFileIndex)
-              diffListRef.current?.scrollToIndex(prevFileIndex)
+            // At first line → prev file's last line
+            navigateToFileWithLastLine(focusedIndex - 1)
+          }
+          break
+        }
 
-              // After navigating, check if prev file is expanded and focus its last hunk
-              setTimeout(() => {
-                if (diffListRef.current?.isExpanded(prevFile.path)) {
+        // HUNK NAVIGATION ({/})
+        case '{': {
+          e.preventDefault()
+          if (focusedIndex === null) {
+            navigateToFileWithFirstLine(0)
+            return
+          }
+
+          const file = files[focusedIndex]
+          const expanded = diffListRef.current?.isExpanded(file.path)
+
+          if (!expanded) {
+            diffListRef.current?.toggleFile(file.path, true)
+          }
+
+          setTimeout(() => {
+            const hunks = getHunkElements(file.path)
+            if (hunks.length === 0) {
+              // No hunks → prev file's last hunk
+              if (focusedIndex > 0) {
+                const prevFile = files[focusedIndex - 1]
+                setFocusedIndex(focusedIndex - 1)
+                diffListRef.current?.scrollToIndex(focusedIndex - 1)
+
+                if (!diffListRef.current?.isExpanded(prevFile.path)) {
+                  diffListRef.current?.toggleFile(prevFile.path, true)
+                }
+
+                setTimeout(() => {
                   const prevHunks = getHunkElements(prevFile.path)
                   if (prevHunks.length > 0) {
-                    setFocusedHunkIndex(prevHunks.length - 1)
-                    scrollToHunk(prevFile.path, prevHunks.length - 1, scrollContainerRef.current)
+                    const lastHunkIdx = prevHunks.length - 1
+                    setFocusedHunkIndex(lastHunkIdx)
+                    const lineIdx = getFirstLineIndexOfHunk(prevFile.path, lastHunkIdx)
+                    setFocusedLineIndex(lineIdx)
+                    scrollToHunk(prevFile.path, lastHunkIdx, scrollContainerRef.current)
                   }
+                }, 50)
+              }
+              return
+            }
+
+            const currentHunk = focusedHunkIndex ?? 0
+            if (currentHunk > 0) {
+              // Move to prev hunk
+              const prevHunk = currentHunk - 1
+              setFocusedHunkIndex(prevHunk)
+              const lineIdx = getFirstLineIndexOfHunk(file.path, prevHunk)
+              setFocusedLineIndex(lineIdx)
+              scrollToHunk(file.path, prevHunk, scrollContainerRef.current)
+            } else {
+              // At first hunk → prev file's last hunk
+              if (focusedIndex > 0) {
+                const prevFile = files[focusedIndex - 1]
+                setFocusedIndex(focusedIndex - 1)
+                diffListRef.current?.scrollToIndex(focusedIndex - 1)
+
+                if (!diffListRef.current?.isExpanded(prevFile.path)) {
+                  diffListRef.current?.toggleFile(prevFile.path, true)
                 }
-              }, 100)
+
+                setTimeout(() => {
+                  const prevHunks = getHunkElements(prevFile.path)
+                  if (prevHunks.length > 0) {
+                    const lastHunkIdx = prevHunks.length - 1
+                    setFocusedHunkIndex(lastHunkIdx)
+                    const lineIdx = getFirstLineIndexOfHunk(prevFile.path, lastHunkIdx)
+                    setFocusedLineIndex(lineIdx)
+                    scrollToHunk(prevFile.path, lastHunkIdx, scrollContainerRef.current)
+                  }
+                }, 50)
+              }
+            }
+          }, expanded ? 0 : 50)
+          break
+        }
+
+        case '}': {
+          e.preventDefault()
+          if (focusedIndex === null) {
+            navigateToFileWithFirstLine(0)
+            return
+          }
+
+          const file = files[focusedIndex]
+          const expanded = diffListRef.current?.isExpanded(file.path)
+
+          if (!expanded) {
+            diffListRef.current?.toggleFile(file.path, true)
+          }
+
+          setTimeout(() => {
+            const hunks = getHunkElements(file.path)
+            if (hunks.length === 0) {
+              // No hunks → next file's first hunk
+              if (focusedIndex < files.length - 1) {
+                const nextFile = files[focusedIndex + 1]
+                setFocusedIndex(focusedIndex + 1)
+                diffListRef.current?.scrollToIndex(focusedIndex + 1)
+
+                if (!diffListRef.current?.isExpanded(nextFile.path)) {
+                  diffListRef.current?.toggleFile(nextFile.path, true)
+                }
+
+                setTimeout(() => {
+                  const nextHunks = getHunkElements(nextFile.path)
+                  if (nextHunks.length > 0) {
+                    setFocusedHunkIndex(0)
+                    const lineIdx = getFirstLineIndexOfHunk(nextFile.path, 0)
+                    setFocusedLineIndex(lineIdx)
+                    scrollToHunk(nextFile.path, 0, scrollContainerRef.current)
+                  }
+                }, 50)
+              }
+              return
+            }
+
+            const currentHunk = focusedHunkIndex ?? -1
+            if (currentHunk < hunks.length - 1) {
+              // Move to next hunk
+              const nextHunk = currentHunk + 1
+              setFocusedHunkIndex(nextHunk)
+              const lineIdx = getFirstLineIndexOfHunk(file.path, nextHunk)
+              setFocusedLineIndex(lineIdx)
+              scrollToHunk(file.path, nextHunk, scrollContainerRef.current)
+            } else {
+              // At last hunk → next file's first hunk
+              if (focusedIndex < files.length - 1) {
+                const nextFile = files[focusedIndex + 1]
+                setFocusedIndex(focusedIndex + 1)
+                diffListRef.current?.scrollToIndex(focusedIndex + 1)
+
+                if (!diffListRef.current?.isExpanded(nextFile.path)) {
+                  diffListRef.current?.toggleFile(nextFile.path, true)
+                }
+
+                setTimeout(() => {
+                  const nextHunks = getHunkElements(nextFile.path)
+                  if (nextHunks.length > 0) {
+                    setFocusedHunkIndex(0)
+                    const lineIdx = getFirstLineIndexOfHunk(nextFile.path, 0)
+                    setFocusedLineIndex(lineIdx)
+                    scrollToHunk(nextFile.path, 0, scrollContainerRef.current)
+                  }
+                }, 50)
+              }
+            }
+          }, expanded ? 0 : 50)
+          break
+        }
+
+        // FILE NAVIGATION ([[/]])
+        case '[': {
+          if (lastKeyRef.current === '[') {
+            e.preventDefault()
+            // [[ - previous file
+            if (focusedIndex === null) {
+              navigateToFileWithFirstLine(files.length - 1)
+            } else if (focusedIndex > 0) {
+              navigateToFileWithFirstLine(focusedIndex - 1)
+            }
+            lastKeyRef.current = null
+          } else {
+            lastKeyRef.current = '['
+            lastKeyTimeRef.current = now
+          }
+          break
+        }
+
+        case ']': {
+          if (lastKeyRef.current === ']') {
+            e.preventDefault()
+            // ]] - next file
+            if (focusedIndex === null) {
+              navigateToFileWithFirstLine(0)
+            } else if (focusedIndex < files.length - 1) {
+              navigateToFileWithFirstLine(focusedIndex + 1)
+            }
+            lastKeyRef.current = null
+          } else {
+            lastKeyRef.current = ']'
+            lastKeyTimeRef.current = now
+          }
+          break
+        }
+
+        case 'h': {
+          e.preventDefault()
+          if (focusedIndex !== null && focusedIndex < files.length) {
+            const file = files[focusedIndex]
+            if (diffListRef.current?.isExpanded(file.path)) {
+              setFocusedHunkIndex(null)
+              setFocusedLineIndex(null)
+              applyLineFocus(null)
+              diffListRef.current?.toggleFile(file.path, false)
             }
           }
+          break
         }
-        break
-      }
 
-      case 'h': {
-        e.preventDefault()
-        if (focusedIndex !== null && focusedIndex < files.length) {
-          const file = files[focusedIndex]
-          if (diffListRef.current?.isExpanded(file.path)) {
-            setFocusedHunkIndex(null)
-            diffListRef.current?.toggleFile(file.path, false)
-          }
-        }
-        break
-      }
-
-      case 'l': {
-        e.preventDefault()
-        if (focusedIndex !== null && focusedIndex < files.length) {
-          const file = files[focusedIndex]
-          if (!diffListRef.current?.isExpanded(file.path)) {
-            diffListRef.current?.toggleFile(file.path, true)
-            // Wait for DOM to render, then focus first hunk
-            setTimeout(() => {
-              const hunks = getHunkElements(file.path)
-              if (hunks.length > 0) {
-                setFocusedHunkIndex(0)
-                scrollToHunk(file.path, 0, scrollContainerRef.current)
-              }
-            }, 50)
-          }
-        }
-        break
-      }
-
-      case 'Enter':
-      case ' ': {
-        if (key === ' ') e.preventDefault()
-        if (focusedIndex !== null && focusedIndex < files.length) {
-          const file = files[focusedIndex]
-          const willExpand = !diffListRef.current?.isExpanded(file.path)
-          diffListRef.current?.toggleFile(file.path, willExpand)
-
-          if (willExpand) {
-            // Expanding → focus first hunk
-            setTimeout(() => {
-              const hunks = getHunkElements(file.path)
-              if (hunks.length > 0) {
-                setFocusedHunkIndex(0)
-                scrollToHunk(file.path, 0, scrollContainerRef.current)
-              }
-            }, 50)
-          } else {
-            // Collapsing → exit hunk mode
-            setFocusedHunkIndex(null)
-          }
-        }
-        break
-      }
-
-      case 'g': {
-        if (lastKeyRef.current === 'g') {
+        case 'l': {
           e.preventDefault()
-          navigateToFile(0)
-          lastKeyRef.current = null
-        } else {
-          lastKeyRef.current = 'g'
-          lastKeyTimeRef.current = now
+          if (focusedIndex !== null && focusedIndex < files.length) {
+            const file = files[focusedIndex]
+            if (!diffListRef.current?.isExpanded(file.path)) {
+              diffListRef.current?.toggleFile(file.path, true)
+              // Wait for DOM to render, then focus first line
+              setTimeout(() => {
+                const lines = getAllDiffLines(file.path)
+                if (lines.length > 0) {
+                  setFocusedLineIndex(0)
+                  const hunkIdx = getHunkIndexForLine(lines[0], file.path)
+                  setFocusedHunkIndex(hunkIdx)
+                  scrollToLine(file.path, 0, scrollContainerRef.current)
+                }
+              }, 50)
+            }
+          }
+          break
         }
-        break
-      }
 
-      case 'G': {
-        e.preventDefault()
-        navigateToFile(files.length - 1)
-        break
-      }
+        case 'Enter':
+        case ' ': {
+          if (key === ' ') e.preventDefault()
+          if (focusedIndex !== null && focusedIndex < files.length) {
+            const file = files[focusedIndex]
+            const willExpand = !diffListRef.current?.isExpanded(file.path)
+            diffListRef.current?.toggleFile(file.path, willExpand)
 
-      case 'H': {
-        e.preventDefault()
-        setFocusedHunkIndex(null)
-        diffListRef.current?.collapseAll()
-        break
-      }
-
-      case 'L': {
-        e.preventDefault()
-        diffListRef.current?.expandAll()
-        break
-      }
-
-      case 'o': {
-        e.preventDefault()
-        if (focusedIndex !== null && focusedIndex < files.length && openInEditor) {
-          openInEditor(files[focusedIndex].path)
+            if (willExpand) {
+              // Expanding → focus first line
+              setTimeout(() => {
+                const lines = getAllDiffLines(file.path)
+                if (lines.length > 0) {
+                  setFocusedLineIndex(0)
+                  const hunkIdx = getHunkIndexForLine(lines[0], file.path)
+                  setFocusedHunkIndex(hunkIdx)
+                  scrollToLine(file.path, 0, scrollContainerRef.current)
+                }
+              }, 50)
+            } else {
+              // Collapsing → exit line/hunk mode
+              setFocusedHunkIndex(null)
+              setFocusedLineIndex(null)
+              applyLineFocus(null)
+            }
+          }
+          break
         }
-        break
-      }
 
-      case 'Escape': {
-        e.preventDefault()
-        deactivate()
-        break
-      }
-
-      default:
-        if (key !== 'g') {
-          lastKeyRef.current = null
+        case 'g': {
+          if (lastKeyRef.current === 'g') {
+            e.preventDefault()
+            navigateToFileWithFirstLine(0)
+            lastKeyRef.current = null
+          } else {
+            lastKeyRef.current = 'g'
+            lastKeyTimeRef.current = now
+          }
+          break
         }
-        break
-    }
-  }, [
-    isActive,
-    activate,
-    focusedIndex,
-    focusedHunkIndex,
-    files,
-    diffListRef,
-    openInEditor,
-    navigateToFile,
-    deactivate,
-    scrollContainerRef,
-  ])
+
+        case 'G': {
+          e.preventDefault()
+          navigateToFileWithFirstLine(files.length - 1)
+          break
+        }
+
+        case 'H': {
+          e.preventDefault()
+          setFocusedHunkIndex(null)
+          setFocusedLineIndex(null)
+          applyLineFocus(null)
+          diffListRef.current?.collapseAll()
+          break
+        }
+
+        case 'L': {
+          e.preventDefault()
+          diffListRef.current?.expandAll()
+          break
+        }
+
+        case 'o': {
+          e.preventDefault()
+          if (
+            focusedIndex !== null &&
+            focusedIndex < files.length &&
+            openInEditor
+          ) {
+            openInEditor(files[focusedIndex].path)
+          }
+          break
+        }
+
+        case 'Escape': {
+          e.preventDefault()
+          deactivate()
+          break
+        }
+
+        default:
+          if (key !== 'g' && key !== '[' && key !== ']') {
+            lastKeyRef.current = null
+          }
+          break
+      }
+    },
+    [
+      isActive,
+      activate,
+      focusedIndex,
+      focusedHunkIndex,
+      focusedLineIndex,
+      files,
+      diffListRef,
+      openInEditor,
+      navigateToFile,
+      navigateToFileWithFirstLine,
+      navigateToFileWithLastLine,
+      deactivate,
+      scrollContainerRef,
+    ]
+  )
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -442,6 +899,7 @@ export function useVimNavigation({
   return {
     focusedIndex,
     focusedHunkIndex,
+    focusedLineIndex,
     isActive,
     setFocusedIndex,
     activate,

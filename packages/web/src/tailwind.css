@@ -154,8 +154,26 @@
 
 /* Vim navigation: focused hunk highlight */
 [data-separator="line-info"].hunk-focused {
-  background: rgba(59, 130, 246, 0.15) !important;
-  box-shadow: inset 3px 0 0 rgb(59, 130, 246);
+  background: rgba(251, 191, 36, 0.15) !important;
+  box-shadow: inset 3px 0 0 rgb(251, 191, 36);
+}
+
+/* Vim navigation: focused line highlight - blue for context lines */
+[data-line].line-focused {
+  background: rgba(59, 130, 246, 0.1) !important;
+  box-shadow: inset 2px 0 0 rgb(59, 130, 246);
+}
+
+/* Green highlight for additions */
+[data-line-type="change-addition"].line-focused {
+  background: rgba(34, 197, 94, 0.15) !important;
+  box-shadow: inset 2px 0 0 rgb(34, 197, 94);
+}
+
+/* Red highlight for deletions */
+[data-line-type="change-deletion"].line-focused {
+  background: rgba(239, 68, 68, 0.15) !important;
+  box-shadow: inset 2px 0 0 rgb(239, 68, 68);
 }
 
 /* Markdown Preview Styles - optimized for readability */

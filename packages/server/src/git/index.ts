@@ -1,9 +1,45 @@
 import simpleGit, { type SimpleGit } from 'simple-git'
-import { stat } from 'fs/promises'
+import { stat, readFile } from 'fs/promises'
 import { join } from 'path'
 import type { DiffResult, FileDiffInfo, CommitInfo, BranchInfo, WorktreeInfo } from './types'
 
 export * from './types'
+
+// =============================================================================
+// CACHING
+// =============================================================================
+
+// Simple TTL cache for expensive git operations
+const cache = new Map<string, { data: unknown; expires: number }>()
+
+function getCached<T>(key: string, ttlMs: number, getter: () => Promise<T>): Promise<T> {
+  const cached = cache.get(key)
+  if (cached && cached.expires > Date.now()) {
+    return Promise.resolve(cached.data as T)
+  }
+  return getter().then(data => {
+    cache.set(key, { data, expires: Date.now() + ttlMs })
+    return data
+  })
+}
+
+/**
+ * Clear cache entries. Called when file system changes are detected.
+ * @param pattern - Optional pattern to match cache keys. If omitted, clears all.
+ */
+export function invalidateCache(pattern?: string) {
+  if (!pattern) {
+    cache.clear()
+  } else {
+    for (const key of cache.keys()) {
+      if (key.includes(pattern)) cache.delete(key)
+    }
+  }
+}
+
+// =============================================================================
+// GIT CLIENT
+// =============================================================================
 
 export function createGitClient(repoPath: string): SimpleGit {
   return simpleGit(repoPath)
@@ -20,6 +56,8 @@ function getFileStats(file: { binary?: boolean; insertions?: number; deletions?:
 }
 
 export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
+  const MAX_PATCH_SIZE = 50000 // 50KB max per file for display
+
   // Get diff of working directory against HEAD
   // Run diffSummary, name-status, get repo root, and untracked files in parallel
   const [diffSummary, nameStatusRaw, repoRoot, untrackedRaw] = await Promise.all([
@@ -40,23 +78,26 @@ export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
     }
   }
 
+  // PARALLEL: Fetch all file patches at once instead of sequentially
+  const patchPromises = diffSummary.files.map(async (file) => {
+    const rawPatch = await git.diff(['HEAD', '--', file.file])
+    return { file, rawPatch }
+  })
+  const patchResults = await Promise.all(patchPromises)
+
+  // Process tracked file results
   const files: FileDiffInfo[] = []
   let totalAdditions = 0
   let totalDeletions = 0
 
-  for (const file of diffSummary.files) {
+  for (const { file, rawPatch } of patchResults) {
     const { additions, deletions } = getFileStats(file as any)
     totalAdditions += additions
     totalDeletions += deletions
 
-    // Get the actual patch for this file
-    // Limit patch size to prevent browser lockup on large files (e.g., source maps)
-    const MAX_PATCH_SIZE = 50000 // 50KB max per file for display
-    const rawPatch = await git.diff(['HEAD', '--', file.file])
     const isLarge = rawPatch.length > MAX_PATCH_SIZE
-    const patch = isLarge ? '' : rawPatch // Don't send large patches
+    const patch = isLarge ? '' : rawPatch
 
-    // Determine file status from name-status output
     const gitStatus = fileStatuses.get(file.file) || 'M'
     const status = gitStatus === 'A' ? 'added'
       : gitStatus === 'D' ? 'deleted'
@@ -73,46 +114,51 @@ export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
     })
   }
 
-  // Process untracked files
+  // PARALLEL: Process untracked files - read all at once
   const untrackedFiles = untrackedRaw.trim().split('\n').filter(Boolean)
-  const MAX_PATCH_SIZE = 50000
 
-  for (const filePath of untrackedFiles) {
+  const untrackedPromises = untrackedFiles.map(async (filePath) => {
     try {
-      const fs = await import('fs/promises')
       const fullPath = join(repoRoot, filePath)
-      const content = await fs.readFile(fullPath, 'utf-8')
-      const lines = content.split('\n')
-      const lineCount = lines.length
+      const content = await readFile(fullPath, 'utf-8')
+      return { filePath, content, error: null }
+    } catch {
+      return { filePath, content: null, error: true }
+    }
+  })
+  const untrackedResults = await Promise.all(untrackedPromises)
 
-      // Create a unified diff patch for the untracked file (all lines as additions)
-      const isLarge = content.length > MAX_PATCH_SIZE
-      let patch = ''
-      if (!isLarge) {
-        const patchLines = lines.map((line) => `+${line}`).join('\n')
-        patch = `diff --git a/${filePath} b/${filePath}
+  // Process untracked file results
+  for (const { filePath, content, error } of untrackedResults) {
+    if (error || content === null) continue
+
+    const lines = content.split('\n')
+    const lineCount = lines.length
+    const isLarge = content.length > MAX_PATCH_SIZE
+
+    let patch = ''
+    if (!isLarge) {
+      const patchLines = lines.map((line) => `+${line}`).join('\n')
+      patch = `diff --git a/${filePath} b/${filePath}
 new file mode 100644
 --- /dev/null
 +++ b/${filePath}
 @@ -0,0 +1,${lineCount} @@
 ${patchLines}`
-      }
-
-      totalAdditions += lineCount
-      files.push({
-        path: filePath,
-        status: 'untracked',
-        additions: lineCount,
-        deletions: 0,
-        patch,
-        isLarge,
-      })
-    } catch {
-      // Skip files we can't read (binary, permissions, etc.)
     }
+
+    totalAdditions += lineCount
+    files.push({
+      path: filePath,
+      status: 'untracked',
+      additions: lineCount,
+      deletions: 0,
+      patch,
+      isLarge,
+    })
   }
 
-  // Fetch file modification times in parallel (skip deleted files as they don't exist)
+  // PARALLEL: Fetch file modification times (skip deleted files as they don't exist)
   await Promise.all(
     files.map(async (f) => {
       if (f.status === 'deleted') return
@@ -212,18 +258,22 @@ export async function getCommitDiff(git: SimpleGit, sha: string): Promise<{ comm
 
   // Get diff summary
   const diffSummary = await git.diffSummary([baseRef, sha])
-  const files: FileDiffInfo[] = []
 
+  // PARALLEL: Fetch all patches at once instead of sequentially
+  const patchPromises = diffSummary.files.map(async (file) => {
+    const patch = await git.diff([baseRef, sha, '--', file.file]).catch(() => '')
+    return { file, patch }
+  })
+  const patchResults = await Promise.all(patchPromises)
+
+  const files: FileDiffInfo[] = []
   let totalAdditions = 0
   let totalDeletions = 0
 
-  for (const file of diffSummary.files) {
+  for (const { file, patch } of patchResults) {
     const { additions, deletions } = getFileStats(file as any)
     totalAdditions += additions
     totalDeletions += deletions
-
-    // Get the patch
-    const patch = await git.diff([baseRef, sha, '--', file.file]).catch(() => '')
 
     // Determine status from diff summary flags
     const fileAny = file as any
@@ -252,24 +302,28 @@ export async function compareBranches(
   base: string,
   head: string
 ): Promise<DiffResult & { commitCount: number }> {
-  // Get commit count between branches
-  const countResult = await git.raw(['rev-list', '--count', `${base}..${head}`])
+  // Get commit count and diff summary in parallel
+  const [countResult, diffSummary] = await Promise.all([
+    git.raw(['rev-list', '--count', `${base}..${head}`]),
+    git.diffSummary([base, head]),
+  ])
   const commitCount = parseInt(countResult.trim(), 10)
 
-  // Get diff summary
-  const diffSummary = await git.diffSummary([base, head])
-  const files: FileDiffInfo[] = []
+  // PARALLEL: Fetch all patches at once instead of sequentially
+  const patchPromises = diffSummary.files.map(async (file) => {
+    const patch = await git.diff([base, head, '--', file.file]).catch(() => '')
+    return { file, patch }
+  })
+  const patchResults = await Promise.all(patchPromises)
 
+  const files: FileDiffInfo[] = []
   let totalAdditions = 0
   let totalDeletions = 0
 
-  for (const file of diffSummary.files) {
+  for (const { file, patch } of patchResults) {
     const { additions, deletions } = getFileStats(file as any)
     totalAdditions += additions
     totalDeletions += deletions
-
-    // Get the patch for this file
-    const patch = await git.diff([base, head, '--', file.file]).catch(() => '')
 
     // Determine status from diff summary flags
     const fileAny = file as any
@@ -340,9 +394,9 @@ export async function getWorktrees(
   const worktreeOutput = await git.raw(['worktree', 'list', '--porcelain'])
   const currentPath = (await git.revparse(['--show-toplevel'])).trim()
 
-  // Parse porcelain output
+  // Parse porcelain output - collect basic info first
   const worktreeBlocks = worktreeOutput.trim().split('\n\n')
-  const worktrees: WorktreeInfo[] = []
+  const parsedWorktrees: Array<{ path: string; commit: string; branch: string; isCurrent: boolean }> = []
 
   for (const block of worktreeBlocks) {
     const lines = block.split('\n')
@@ -368,40 +422,37 @@ export async function getWorktrees(
     // Skip bare worktrees
     if (!branch && !block.includes('detached')) continue
 
-    const isCurrent = path === currentPath
+    parsedWorktrees.push({
+      path,
+      commit,
+      branch,
+      isCurrent: path === currentPath,
+    })
+  }
 
-    // Get ahead/behind counts relative to main
-    let behindMain = 0
-    let aheadOfMain = 0
-    try {
-      const behindOutput = await git.raw(['rev-list', '--count', `${branch}..${mainBranch}`]).catch(() => '0')
-      behindMain = parseInt(behindOutput.trim(), 10) || 0
+  // PARALLEL: Fetch stats for all worktrees at once
+  const statsPromises = parsedWorktrees.map(async (wt) => {
+    const { path, commit, branch, isCurrent } = wt
 
-      const aheadOutput = await git.raw(['rev-list', '--count', `${mainBranch}..${branch}`]).catch(() => '0')
-      aheadOfMain = parseInt(aheadOutput.trim(), 10) || 0
-    } catch {
-      // Branch might not exist or main might not exist
-    }
+    // Fetch all three stats in parallel for each worktree
+    const [behindOutput, aheadOutput, dateOutput] = await Promise.all([
+      git.raw(['rev-list', '--count', `${branch}..${mainBranch}`]).catch(() => '0'),
+      git.raw(['rev-list', '--count', `${mainBranch}..${branch}`]).catch(() => '0'),
+      git.raw(['log', '-1', '--format=%cI', branch]).catch(() => new Date().toISOString()),
+    ])
 
-    // Get last commit date for this branch
-    let lastActivity = new Date().toISOString()
-    try {
-      const dateOutput = await git.raw(['log', '-1', '--format=%cI', branch])
-      lastActivity = dateOutput.trim()
-    } catch {
-      // Use current time if we can't get the date
-    }
-
-    worktrees.push({
+    return {
       path,
       branch,
       commit: commit.slice(0, 7),
       isCurrent,
-      behindMain,
-      aheadOfMain,
-      lastActivity,
-    })
-  }
+      behindMain: parseInt(behindOutput.trim(), 10) || 0,
+      aheadOfMain: parseInt(aheadOutput.trim(), 10) || 0,
+      lastActivity: dateOutput.trim() || new Date().toISOString(),
+    }
+  })
+
+  const worktrees = await Promise.all(statsPromises)
 
   // Sort by last activity (most recent first)
   worktrees.sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime())
@@ -481,5 +532,152 @@ export async function performFetch(git: SimpleGit, remote = 'origin'): Promise<F
     success: true,
     remote,
     message: `Successfully fetched from ${remote}`,
+  }
+}
+
+export interface CheckoutPRResult {
+  success: boolean
+  prNumber: number
+  branchName: string
+  message: string
+}
+
+export async function checkoutPR(git: SimpleGit, prNumber: number, remote = 'origin'): Promise<CheckoutPRResult> {
+  const branchName = `pr-${prNumber}`
+
+  // Fetch the PR ref to a local branch
+  // GitHub format: pull/PR_NUMBER/head
+  // GitLab format: merge-requests/MR_NUMBER/head
+  // Try GitHub format first (most common)
+  try {
+    await git.fetch([remote, `pull/${prNumber}/head:${branchName}`])
+  } catch {
+    // Try GitLab format
+    try {
+      await git.fetch([remote, `merge-requests/${prNumber}/head:${branchName}`])
+    } catch (e) {
+      throw new Error(`Failed to fetch PR #${prNumber}. Make sure the PR exists and you have access to it.`)
+    }
+  }
+
+  // Checkout the branch
+  await git.checkout(branchName)
+
+  return {
+    success: true,
+    prNumber,
+    branchName,
+    message: `Checked out PR #${prNumber} to branch ${branchName}`,
+  }
+}
+
+export interface OpenPRWorktreeResult {
+  success: boolean
+  prNumber: number
+  branchName: string
+  worktreePath: string
+  message: string
+}
+
+/**
+ * Opens a PR in a new worktree without affecting the current branch.
+ * This allows viewing PRs in separate tabs without switching the main worktree.
+ */
+export async function openPRWorktree(git: SimpleGit, prNumber: number, remote = 'origin'): Promise<OpenPRWorktreeResult> {
+  const branchName = `pr-${prNumber}`
+  const os = await import('os')
+  const path = await import('path')
+  const fs = await import('fs/promises')
+
+  // Get repo name for unique worktree directory
+  const repoRoot = (await git.revparse(['--show-toplevel'])).trim()
+  const repoName = path.basename(repoRoot)
+
+  // Create worktree in temp directory
+  const worktreePath = path.join(os.tmpdir(), `differ-${repoName}-pr-${prNumber}`)
+
+  // Check if worktree already exists
+  try {
+    await fs.access(worktreePath)
+    // Worktree exists, just return it
+    return {
+      success: true,
+      prNumber,
+      branchName,
+      worktreePath,
+      message: `PR #${prNumber} worktree already exists at ${worktreePath}`,
+    }
+  } catch {
+    // Worktree doesn't exist, create it
+  }
+
+  // Fetch the PR ref to a local branch
+  // GitHub format: pull/PR_NUMBER/head
+  // GitLab format: merge-requests/MR_NUMBER/head
+  try {
+    await git.fetch([remote, `pull/${prNumber}/head:${branchName}`])
+  } catch {
+    try {
+      await git.fetch([remote, `merge-requests/${prNumber}/head:${branchName}`])
+    } catch {
+      throw new Error(`Failed to fetch PR #${prNumber}. Make sure the PR exists and you have access to it.`)
+    }
+  }
+
+  // Create the worktree
+  try {
+    await git.raw(['worktree', 'add', worktreePath, branchName])
+  } catch (e) {
+    // If worktree add fails because branch already exists, try without creating a new branch
+    try {
+      await git.raw(['worktree', 'add', worktreePath, branchName])
+    } catch {
+      throw new Error(`Failed to create worktree for PR #${prNumber}: ${e instanceof Error ? e.message : 'Unknown error'}`)
+    }
+  }
+
+  return {
+    success: true,
+    prNumber,
+    branchName,
+    worktreePath,
+    message: `Opened PR #${prNumber} in worktree at ${worktreePath}`,
+  }
+}
+
+/**
+ * Removes a PR worktree when the tab is closed.
+ */
+export async function closePRWorktree(git: SimpleGit, prNumber: number): Promise<{ success: boolean; message: string }> {
+  const os = await import('os')
+  const path = await import('path')
+
+  // Get repo name for worktree directory
+  const repoRoot = (await git.revparse(['--show-toplevel'])).trim()
+  const repoName = path.basename(repoRoot)
+
+  const worktreePath = path.join(os.tmpdir(), `differ-${repoName}-pr-${prNumber}`)
+
+  try {
+    // Remove the worktree
+    await git.raw(['worktree', 'remove', worktreePath, '--force'])
+
+    // Optionally delete the local branch
+    const branchName = `pr-${prNumber}`
+    try {
+      await git.branch(['-D', branchName])
+    } catch {
+      // Branch might not exist or be checked out elsewhere
+    }
+
+    return {
+      success: true,
+      message: `Removed PR #${prNumber} worktree`,
+    }
+  } catch (e) {
+    return {
+      success: false,
+      message: `Failed to remove worktree: ${e instanceof Error ? e.message : 'Unknown error'}`,
+    }
   }
 }
