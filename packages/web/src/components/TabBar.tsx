@@ -1,6 +1,7 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useTabs, type Tab, type TabType } from '../contexts/TabContext'
+import { Pin } from 'lucide-react'
 import { Button } from './ui/button'
 import { ScrollArea, ScrollBar } from './ui/scroll-area'
 import {
@@ -83,10 +84,11 @@ interface TabItemProps {
 
 function TabItem({ tab, isActive, onClose, onClick, onMiddleClick }: TabItemProps) {
   const Icon = getTabIcon(tab.type)
+  const isPinned = tab.pinned
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Middle click to close
-    if (e.button === 1) {
+    // Middle click to close (not for pinned tabs)
+    if (e.button === 1 && !isPinned) {
       e.preventDefault()
       onMiddleClick()
     }
@@ -94,7 +96,9 @@ function TabItem({ tab, isActive, onClose, onClick, onMiddleClick }: TabItemProp
 
   const handleCloseClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    onClose()
+    if (!isPinned) {
+      onClose()
+    }
   }
 
   return (
@@ -118,17 +122,21 @@ function TabItem({ tab, isActive, onClose, onClick, onMiddleClick }: TabItemProp
             <span className="max-w-32 truncate text-xs font-medium">
               {tab.label}
             </span>
-            <button
-              onClick={handleCloseClick}
-              className={`
-                ml-1 rounded p-0.5
-                transition-opacity
-                hover:bg-muted-foreground/20
-                ${isActive ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-60 hover:!opacity-100'}
-              `}
-            >
-              <X className="size-3" />
-            </button>
+            {isPinned ? (
+              <Pin className="ml-1 size-3 text-muted-foreground/50" />
+            ) : (
+              <button
+                onClick={handleCloseClick}
+                className={`
+                  ml-1 rounded p-0.5
+                  transition-opacity
+                  hover:bg-muted-foreground/20
+                  ${isActive ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-60 hover:!opacity-100'}
+                `}
+              >
+                <X className="size-3" />
+              </button>
+            )}
             {/* Active indicator */}
             {isActive && (
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
@@ -136,7 +144,7 @@ function TabItem({ tab, isActive, onClose, onClick, onMiddleClick }: TabItemProp
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs">
-          <p>{tab.label}</p>
+          <p>{tab.label}{isPinned && ' (pinned)'}</p>
           {tab.repoPath && (
             <p className="text-muted-foreground font-mono text-[10px]">
               {tab.repoPath}
@@ -207,9 +215,20 @@ function NewTabMenu() {
 }
 
 export function TabBar() {
-  const { tabs, activeTabId, switchTab, closeTab } = useTabs()
+  const { tabs, activeTabId, activeTab, switchTab, closeTab, updateTabRoute } = useTabs()
   const navigate = useNavigate()
+  const location = useLocation()
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Sync current route to active tab
+  useEffect(() => {
+    if (activeTabId && activeTab) {
+      const currentPath = location.pathname + location.search
+      if (activeTab.route !== currentPath) {
+        updateTabRoute(activeTabId, currentPath)
+      }
+    }
+  }, [location.pathname, location.search, activeTabId, activeTab, updateTabRoute])
 
   // Scroll active tab into view
   useEffect(() => {
@@ -221,22 +240,23 @@ export function TabBar() {
     }
   }, [activeTabId])
 
-  const handleTabClick = (tab: Tab) => {
+  const handleTabClick = useCallback((tab: Tab) => {
     switchTab(tab.id)
-    navigate(getRouteForTab(tab))
-  }
+    // Use the tab's stored route instead of computing from type
+    navigate(tab.route)
+  }, [switchTab, navigate])
 
-  const handleTabClose = (tabId: string) => {
+  const handleTabClose = useCallback((tabId: string) => {
     closeTab(tabId)
-  }
+  }, [closeTab])
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd/Ctrl + W to close active tab
+      // Cmd/Ctrl + W to close active tab (only if not pinned)
       if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
         e.preventDefault()
-        if (activeTabId) {
+        if (activeTabId && activeTab && !activeTab.pinned) {
           closeTab(activeTabId)
         }
       }
@@ -257,7 +277,7 @@ export function TabBar() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeTabId, closeTab, tabs])
+  }, [activeTabId, activeTab, closeTab, tabs, handleTabClick])
 
   return (
     <div className="flex h-9 shrink-0 items-center border-b border-border bg-secondary/30 z-20 relative">

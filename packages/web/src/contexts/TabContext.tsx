@@ -33,6 +33,8 @@ export interface Tab {
   repoPath: string // Each tab has its own repo/worktree path
   context: TabContext
   viewState: TabViewState
+  route: string // Current route/view for this tab
+  pinned?: boolean // Pinned tabs can't be closed or have their repoPath changed
 }
 
 // Configuration for creating a new tab
@@ -42,6 +44,8 @@ export interface CreateTabConfig {
   repoPath?: string
   context?: TabContext
   viewState?: Partial<TabViewState>
+  route?: string
+  pinned?: boolean
 }
 
 // Context value interface
@@ -57,6 +61,7 @@ interface TabContextValue {
   updateTab: (tabId: string, updates: Partial<Omit<Tab, 'id'>>) => void
   updateTabViewState: (tabId: string, viewState: Partial<TabViewState>) => void
   updateTabContext: (tabId: string, context: Partial<TabContext>) => void
+  updateTabRoute: (tabId: string, route: string) => void
   reorderTabs: (fromIndex: number, toIndex: number) => void
   duplicateTab: (tabId: string) => Tab | null
 
@@ -102,6 +107,25 @@ function getDefaultViewState(): TabViewState {
   }
 }
 
+function getDefaultRoute(type: TabType): string {
+  switch (type) {
+    case 'working-changes':
+      return '/'
+    case 'history':
+      return '/history'
+    case 'branch-compare':
+      return '/compare'
+    case 'commit':
+      return '/history'
+    case 'pr':
+      return '/prs'
+    case 'worktree':
+      return '/'
+    default:
+      return '/'
+  }
+}
+
 // Get the default repo path from server-injected config or Tauri
 function getServerRepoPath(): string {
   // Check for server-injected config
@@ -123,33 +147,48 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
 
   // Initialize state from localStorage or create default tab
   const [tabs, setTabs] = useState<Tab[]>(() => {
+    // Create the pinned first tab (always CWD, can't be changed)
+    const pinnedTab: Tab = {
+      id: 'pinned-cwd',
+      type: 'working-changes' as TabType,
+      label: 'Changes',
+      repoPath: defaultRepoPath,
+      context: {},
+      viewState: getDefaultViewState(),
+      route: '/',
+      pinned: true,
+    }
+
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         const parsed = JSON.parse(stored)
         if (Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
-          // Validate and restore tabs, ensuring repoPath is set
-          return parsed.tabs.map((tab: Tab) => ({
-            ...tab,
-            repoPath: tab.repoPath || defaultRepoPath,
-          }))
+          // Restore tabs, but ensure first tab is always the pinned CWD tab
+          const restoredTabs = parsed.tabs
+            .filter((tab: Tab) => tab.id !== 'pinned-cwd' && !tab.pinned)
+            .map((tab: Tab) => ({
+              ...tab,
+              repoPath: tab.repoPath || defaultRepoPath,
+              route: tab.route || getDefaultRoute(tab.type),
+            }))
+
+          // Restore pinned tab's view state if it was saved
+          const savedPinnedTab = parsed.tabs.find((t: Tab) => t.id === 'pinned-cwd' || t.pinned)
+          if (savedPinnedTab) {
+            pinnedTab.viewState = savedPinnedTab.viewState || getDefaultViewState()
+            pinnedTab.route = savedPinnedTab.route || '/'
+          }
+
+          return [pinnedTab, ...restoredTabs]
         }
       }
     } catch {
       // Ignore parse errors
     }
 
-    // Create default "Changes" tab
-    return [
-      {
-        id: generateId(),
-        type: 'working-changes' as TabType,
-        label: 'Changes',
-        repoPath: defaultRepoPath,
-        context: {},
-        viewState: getDefaultViewState(),
-      },
-    ]
+    // Create default with only the pinned tab
+    return [pinnedTab]
   })
 
   const [activeTabId, setActiveTabId] = useState<string | null>(() => {
@@ -192,6 +231,8 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
           ...getDefaultViewState(),
           ...config.viewState,
         },
+        route: config.route || getDefaultRoute(config.type),
+        pinned: config.pinned,
       }
 
       setTabs((prev) => [...prev, newTab])
@@ -204,8 +245,13 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
 
   const closeTab = useCallback(
     (tabId: string) => {
-      // Find the tab being closed to check if it's a PR tab
+      // Find the tab being closed
       const tabToClose = tabs.find((t) => t.id === tabId)
+
+      // Cannot close pinned tabs
+      if (tabToClose?.pinned) {
+        return
+      }
 
       // If it's a PR tab, clean up the worktree asynchronously
       if (tabToClose?.type === 'pr' && tabToClose.context.prNumber) {
@@ -217,20 +263,6 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
       setTabs((prev) => {
         const newTabs = prev.filter((t) => t.id !== tabId)
 
-        // If closing the last tab, create a new default tab
-        if (newTabs.length === 0) {
-          const defaultTab: Tab = {
-            id: generateId(),
-            type: 'working-changes',
-            label: 'Changes',
-            repoPath: defaultRepoPath,
-            context: {},
-            viewState: getDefaultViewState(),
-          }
-          setActiveTabId(defaultTab.id)
-          return [defaultTab]
-        }
-
         // If closing the active tab, switch to an adjacent one
         if (tabId === activeTabId) {
           const closedIndex = prev.findIndex((t) => t.id === tabId)
@@ -241,7 +273,7 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
         return newTabs
       })
     },
-    [activeTabId, defaultRepoPath, tabs]
+    [activeTabId, tabs]
   )
 
   const switchTab = useCallback((tabId: string) => {
@@ -250,7 +282,15 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
 
   const updateTab = useCallback((tabId: string, updates: Partial<Omit<Tab, 'id'>>) => {
     setTabs((prev) =>
-      prev.map((tab) => (tab.id === tabId ? { ...tab, ...updates } : tab))
+      prev.map((tab) => {
+        if (tab.id !== tabId) return tab
+        // For pinned tabs, prevent changing repoPath and pinned status
+        if (tab.pinned) {
+          const { repoPath, pinned, ...safeUpdates } = updates
+          return { ...tab, ...safeUpdates }
+        }
+        return { ...tab, ...updates }
+      })
     )
   }, [])
 
@@ -280,7 +320,21 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
     []
   )
 
+  const updateTabRoute = useCallback(
+    (tabId: string, route: string) => {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === tabId ? { ...tab, route } : tab
+        )
+      )
+    },
+    []
+  )
+
   const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
+    // Don't allow moving the pinned first tab
+    if (fromIndex === 0 || toIndex === 0) return
+
     setTabs((prev) => {
       const newTabs = [...prev]
       const [removed] = newTabs.splice(fromIndex, 1)
@@ -298,6 +352,7 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
         ...tabToDuplicate,
         id: generateId(),
         label: `${tabToDuplicate.label} (copy)`,
+        pinned: false, // Duplicates are never pinned
       }
 
       setTabs((prev) => {
@@ -323,6 +378,7 @@ export function TabProvider({ children, initialRepoPath }: TabProviderProps) {
     updateTab,
     updateTabViewState,
     updateTabContext,
+    updateTabRoute,
     reorderTabs,
     duplicateTab,
     getDefaultRepoPath,
