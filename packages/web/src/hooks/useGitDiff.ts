@@ -9,7 +9,7 @@ import {
 
 export type { DiffResult, FileDiffInfo }
 
-export function useGitDiff() {
+export function useGitDiff(repoPath?: string) {
   const [data, setData] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -19,14 +19,14 @@ export function useGitDiff() {
       setLoading(true)
       setError(null)
 
-      const result = await getCurrentDiff()
+      const result = await getCurrentDiff(repoPath)
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [repoPath])
 
   useEffect(() => {
     fetchDiff()
@@ -35,7 +35,7 @@ export function useGitDiff() {
   return { data, loading, error, refetch: fetchDiff }
 }
 
-export function useCommitDiff(sha: string | null) {
+export function useCommitDiff(sha: string | null, repoPath?: string) {
   const [data, setData] = useState<CommitDiff | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +55,7 @@ export function useCommitDiff(sha: string | null) {
         setLoading(true)
         setError(null)
 
-        const result = await apiGetCommitDiff(sha)
+        const result = await apiGetCommitDiff(sha, repoPath)
 
         // Only update if this is still the current request
         if (currentShaRef.current === sha) {
@@ -77,7 +77,7 @@ export function useCommitDiff(sha: string | null) {
     return () => {
       currentShaRef.current = null
     }
-  }, [sha])
+  }, [sha, repoPath])
 
   const refetch = useCallback(() => {
     if (!sha) return

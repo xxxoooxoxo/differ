@@ -1,11 +1,15 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
 import { useEditor, type EditorType } from '../hooks/useEditor'
 import { useWorktrees, type WorktreeInfo } from '../hooks/useWorktrees'
 import { useBranches } from '../hooks/useBranches'
 import { useRemoteUrl, type RemoteInfo } from '../hooks/useRemoteUrl'
 import { useFetch } from '../hooks/useFetch'
+import { useTabs } from '../contexts/TabContext'
+import { checkoutPR, openPRWorktree } from '../lib/api'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
+import { Input } from './ui/input'
 import {
   Select,
   SelectContent,
@@ -20,9 +24,12 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from './ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
-import { GitBranch, Folder, ChevronDown, ExternalLink, GitPullRequest, Eye, CloudDownload, Loader2 } from 'lucide-react'
+import { GitBranch, Folder, ChevronDown, ExternalLink, GitPullRequest, Eye, CloudDownload, Loader2, GitFork, MoreHorizontal, Download } from 'lucide-react'
 
 export type DiffStyle = 'split' | 'unified'
 
@@ -41,19 +48,54 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function WorktreeDropdown() {
-  const { data, loading, switching, switchWorktree } = useWorktrees(false) // Show all worktrees
+// Combined Branches + Worktrees dropdown
+function BranchesDropdown() {
+  const { activeTab, createTab } = useTabs()
+  const { data: branchData, loading: branchLoading } = useBranches(activeTab?.repoPath)
+  const { data: worktreeData, loading: worktreeLoading, switching, switchWorktree } = useWorktrees(false)
   const { editor } = useEditor()
+  const navigate = useNavigate()
 
-  const worktrees = data?.worktrees ?? []
-  const count = worktrees.length
+  const branches = branchData?.branches ?? []
+  const currentBranch = branchData?.current ?? 'main'
+  const worktrees = worktreeData?.worktrees ?? []
+  const worktreeCount = worktrees.length
 
-  if (loading || count === 0) return null
+  // Find the main/master branch for comparison base
+  const mainBranch = branches.find(b => b.name === 'main' || b.name === 'master')?.name || branches[0]?.name
 
-  const activeWorktree = worktrees.find(w => w.isActive)
-  // Find main worktree (usually on main/master branch or the one marked as "current" by git)
-  const mainWorktree = worktrees.find(w => w.branch === 'main' || w.branch === 'master') || worktrees.find(w => w.isCurrent)
-  const isOnMain = activeWorktree?.path === mainWorktree?.path
+  // Get display info from the current tab
+  const tabType = activeTab?.type
+  const tabLabel = activeTab?.label ?? currentBranch
+  const isCompareTab = tabType === 'branch-compare'
+  const isWorktreeTab = tabType === 'worktree'
+  const isPrTab = tabType === 'pr'
+  const displayBranch = isCompareTab
+    ? activeTab?.context.headBranch
+    : isPrTab
+      ? `PR #${activeTab?.context.prNumber}`
+      : currentBranch
+
+  const handleSelectBranch = (branchName: string) => {
+    // Always open in a new tab
+    if (branchName === mainBranch) {
+      createTab({
+        type: 'working-changes',
+        label: 'Changes',
+      })
+      navigate('/')
+    } else {
+      createTab({
+        type: 'branch-compare',
+        label: `${mainBranch}...${branchName}`,
+        context: {
+          baseBranch: mainBranch,
+          headBranch: branchName,
+        },
+      })
+      navigate(`/compare?base=${mainBranch}&head=${branchName}`)
+    }
+  }
 
   const openInEditor = (path: string) => {
     const editorUrls: Record<EditorType, string> = {
@@ -67,149 +109,47 @@ function WorktreeDropdown() {
     window.location.href = editorUrls[editor]
   }
 
-  const revealInFinder = (path: string) => {
-    window.open(`file://${path}`, '_blank')
+  const handleOpenWorktree = (wt: WorktreeInfo) => {
+    // Open worktree in a new tab
+    createTab({
+      type: 'worktree',
+      label: wt.branch,
+      repoPath: wt.path,
+    })
+    navigate('/')
   }
 
-  const handleSwitchWorktree = async (path: string) => {
-    const success = await switchWorktree(path)
-    if (success) {
-      // Reload the page to refetch all data with new worktree
-      window.location.reload()
-    }
-  }
+  if (branchLoading && worktreeLoading) return null
+
+  const activeWorktree = worktrees.find(w => w.isActive)
+  const mainWorktree = worktrees.find(w => w.branch === 'main' || w.branch === 'master') || worktrees.find(w => w.isCurrent)
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5 h-7" disabled={switching}>
           <GitBranch className="size-3.5" />
-          <span className="max-w-24 truncate text-xs">{activeWorktree?.branch || 'Worktrees'}</span>
-          {count > 1 && (
+          <span className="max-w-28 truncate text-xs">{displayBranch || currentBranch}</span>
+          {worktreeCount > 1 && (
             <Badge variant="secondary" className="h-5 min-w-5 px-1.5 text-[10px]">
-              {count}
+              {worktreeCount}
             </Badge>
           )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80">
-        {/* Quick action to go back to main */}
-        {!isOnMain && mainWorktree && (
-          <>
-            <DropdownMenuItem
-              className="justify-center text-xs font-medium"
-              onClick={() => handleSwitchWorktree(mainWorktree.path)}
-              disabled={switching}
-            >
-              <GitBranch className="mr-1.5 size-3" />
-              Back to {mainWorktree.branch}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
-          All worktrees
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {worktrees.map((wt: WorktreeInfo) => {
-          const dirName = wt.path.split('/').pop() || wt.path
-          const isMain = wt.branch === 'main' || wt.branch === 'master'
-          return (
-            <DropdownMenuItem
-              key={wt.path}
-              className={`flex-col items-start gap-1 py-2 ${wt.isActive ? 'bg-accent/50' : ''}`}
-              onClick={() => !wt.isActive && handleSwitchWorktree(wt.path)}
-              disabled={switching}
-            >
-              <div className="flex w-full items-center gap-2">
-                <span className="font-mono text-sm font-medium">{wt.branch}</span>
-                {wt.isActive && (
-                  <Badge variant="default" className="h-4 px-1.5 text-[10px] bg-emerald-600">
-                    viewing
-                  </Badge>
-                )}
-                {isMain && !wt.isActive && (
-                  <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
-                    main
-                  </Badge>
-                )}
-                <div className="ml-auto flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="size-6"
-                    title="Open in editor"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      openInEditor(wt.path)
-                    }}
-                  >
-                    <Folder className="size-3" />
-                  </Button>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                {wt.behindMain > 0 && (
-                  <span className="text-amber-500">{wt.behindMain} behind</span>
-                )}
-                {wt.aheadOfMain > 0 && (
-                  <span className="text-emerald-500">{wt.aheadOfMain} ahead</span>
-                )}
-                <span className="text-muted-foreground">{formatRelativeTime(wt.lastActivity)}</span>
-              </div>
-              <span className="font-mono text-[11px] text-muted-foreground">{dirName}</span>
-            </DropdownMenuItem>
-          )
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-function BranchSelector() {
-  const { data, loading } = useBranches()
-  const navigate = useNavigate()
-  const location = useLocation()
-
-  const branches = data?.branches ?? []
-  const currentBranch = data?.current ?? 'main'
-
-  if (loading || branches.length === 0) return null
-
-  // Find the main/master branch for comparison base
-  const mainBranch = branches.find(b => b.name === 'main' || b.name === 'master')?.name || branches[0]?.name
-
-  const handleSelectBranch = (branchName: string) => {
-    // Navigate to compare view with this branch vs main
-    if (branchName === mainBranch) {
-      // If selecting main, just go to current changes
-      navigate('/')
-    } else {
-      navigate(`/compare?base=${mainBranch}&head=${branchName}`)
-    }
-  }
-
-  // Parse current comparison from URL if on compare page
-  const searchParams = new URLSearchParams(location.search)
-  const compareHead = location.pathname === '/compare' ? searchParams.get('head') : null
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5 h-7">
-          <GitBranch className="size-3.5" />
-          <span className="max-w-28 truncate text-xs">{compareHead || currentBranch}</span>
           <ChevronDown className="size-3 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto">
+      <DropdownMenuContent align="end" className="w-72 max-h-96 overflow-y-auto">
+        {/* Branches section */}
         <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
-          View branch diff
+          Compare branch
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {branches.map((branch) => {
+        {branches.slice(0, 10).map((branch) => {
           const isMain = branch.name === mainBranch
-          const isSelected = compareHead === branch.name || (!compareHead && branch.current)
+          // Highlight based on current tab's context
+          const isSelected = isCompareTab
+            ? activeTab?.context.headBranch === branch.name
+            : branch.current && !isCompareTab && !isWorktreeTab && !isPrTab
           return (
             <DropdownMenuItem
               key={branch.name}
@@ -230,6 +170,74 @@ function BranchSelector() {
             </DropdownMenuItem>
           )
         })}
+        {branches.length > 10 && (
+          <DropdownMenuItem
+            className="justify-center text-xs text-muted-foreground"
+            onClick={() => navigate('/compare')}
+          >
+            View all {branches.length} branches...
+          </DropdownMenuItem>
+        )}
+
+        {/* Worktrees section - only show if there are worktrees */}
+        {worktreeCount > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+              Worktrees (open in new tab)
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {worktrees.map((wt: WorktreeInfo) => {
+              const isMain = wt.branch === 'main' || wt.branch === 'master'
+              // Check if this worktree is being viewed in the current tab
+              const isViewingThis = activeTab?.repoPath === wt.path
+              return (
+                <DropdownMenuItem
+                  key={wt.path}
+                  className={`flex-col items-start gap-1 py-2 ${isViewingThis ? 'bg-accent/50' : ''}`}
+                  onClick={() => handleOpenWorktree(wt)}
+                >
+                  <div className="flex w-full items-center gap-2">
+                    <span className="font-mono text-xs font-medium">{wt.branch}</span>
+                    {isViewingThis && (
+                      <Badge variant="default" className="h-4 px-1.5 text-[10px] bg-emerald-600">
+                        viewing
+                      </Badge>
+                    )}
+                    {isMain && !isViewingThis && (
+                      <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                        main
+                      </Badge>
+                    )}
+                    <div className="ml-auto flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-5"
+                        title="Open in editor"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openInEditor(wt.path)
+                        }}
+                      >
+                        <Folder className="size-3" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px]">
+                    {wt.behindMain > 0 && (
+                      <span className="text-amber-500">{wt.behindMain} behind</span>
+                    )}
+                    {wt.aheadOfMain > 0 && (
+                      <span className="text-emerald-500">{wt.aheadOfMain} ahead</span>
+                    )}
+                    <span className="text-muted-foreground">{formatRelativeTime(wt.lastActivity)}</span>
+                  </div>
+                </DropdownMenuItem>
+              )
+            })}
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -279,52 +287,158 @@ function getProviderName(provider: RemoteInfo['provider']): string {
   }
 }
 
-function RemoteDropdown() {
-  const { remote, loading } = useRemoteUrl()
-  const { data: branchData } = useBranches()
+// Combined Git Actions dropdown (Fetch + GitHub/Remote + PR checkout)
+function GitActionsDropdown() {
+  const { activeTab, createTab } = useTabs()
+  const { remote, loading: remoteLoading } = useRemoteUrl()
+  const { data: branchData } = useBranches(activeTab?.repoPath)
+  const { loading: isFetching, performFetch } = useFetch()
+  const navigate = useNavigate()
+  const [prNumber, setPrNumber] = useState('')
+  const [checkingOutPr, setCheckingOutPr] = useState(false)
+  const [prError, setPrError] = useState<string | null>(null)
 
   const currentBranch = branchData?.current ?? 'main'
+  const providerName = remote ? getProviderName(remote.provider) : 'Remote'
+  const urls = remote ? getRemoteUrls(remote, currentBranch) : null
 
-  if (loading || !remote) return null
+  const handleOpenPR = async () => {
+    if (!prNumber.trim()) return
+    const prNum = parseInt(prNumber.trim(), 10)
+    if (isNaN(prNum)) {
+      setPrError('Invalid PR number')
+      return
+    }
 
-  const urls = getRemoteUrls(remote, currentBranch)
-  const providerName = getProviderName(remote.provider)
+    setCheckingOutPr(true)
+    setPrError(null)
+    try {
+      // Open PR in a new worktree and create a tab for it
+      const result = await openPRWorktree(prNum)
+      setPrNumber('')
+
+      // Create a new PR tab with the worktree path
+      createTab({
+        type: 'pr',
+        label: `PR #${prNum}`,
+        repoPath: result.worktreePath,
+        context: {
+          prNumber: prNum,
+          prBranch: result.branchName,
+        },
+      })
+      navigate('/')
+    } catch (err) {
+      setPrError(err instanceof Error ? err.message : 'Failed to open PR')
+    } finally {
+      setCheckingOutPr(false)
+    }
+  }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5 h-7">
-          <ExternalLink className="size-3.5" />
-          <span className="text-xs">{providerName}</span>
+          {isFetching || checkingOutPr ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <MoreHorizontal className="size-3.5" />
+          )}
+          <span className="text-xs">Git</span>
           <ChevronDown className="size-3 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
-          {remote.owner}/{remote.repo}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+      <DropdownMenuContent align="end" className="w-64">
+        {/* Fetch action */}
         <DropdownMenuItem
           className="gap-2"
-          onClick={() => window.open(urls.viewBranch, '_blank')}
+          onClick={() => performFetch()}
+          disabled={isFetching}
         >
-          <Eye className="size-3.5" />
-          <span className="text-xs">View branch on {providerName}</span>
+          {isFetching ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <CloudDownload className="size-3.5" />
+          )}
+          <span className="text-xs">Fetch from remote</span>
         </DropdownMenuItem>
-        <DropdownMenuItem
-          className="gap-2"
-          onClick={() => window.open(urls.createPr, '_blank')}
-        >
-          <GitPullRequest className="size-3.5" />
-          <span className="text-xs">Create Pull Request</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="gap-2"
-          onClick={() => window.open(urls.viewPrs, '_blank')}
-        >
-          <GitBranch className="size-3.5" />
-          <span className="text-xs">View Pull Requests</span>
-        </DropdownMenuItem>
+
+        {/* Remote/GitHub actions - only show if remote is available */}
+        {remote && urls && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+              {remote.owner}/{remote.repo}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2"
+              onClick={() => window.open(urls.viewBranch, '_blank')}
+            >
+              <Eye className="size-3.5" />
+              <span className="text-xs">View branch on {providerName}</span>
+              <ExternalLink className="ml-auto size-3 text-muted-foreground" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2"
+              onClick={() => window.open(urls.createPr, '_blank')}
+            >
+              <GitPullRequest className="size-3.5" />
+              <span className="text-xs">Create Pull Request</span>
+              <ExternalLink className="ml-auto size-3 text-muted-foreground" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2"
+              onClick={() => window.open(urls.viewPrs, '_blank')}
+            >
+              <GitFork className="size-3.5" />
+              <span className="text-xs">View Pull Requests</span>
+              <ExternalLink className="ml-auto size-3 text-muted-foreground" />
+            </DropdownMenuItem>
+
+            {/* Open PR in new tab section */}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+              Open PR in new tab
+            </DropdownMenuLabel>
+            <div className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+              <div className="flex gap-1.5">
+                <Input
+                  type="text"
+                  placeholder="PR #"
+                  value={prNumber}
+                  onChange={(e) => {
+                    setPrNumber(e.target.value)
+                    setPrError(null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleOpenPR()
+                    }
+                  }}
+                  className="h-7 text-xs flex-1"
+                  disabled={checkingOutPr}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 px-2"
+                  onClick={handleOpenPR}
+                  disabled={checkingOutPr || !prNumber.trim()}
+                >
+                  {checkingOutPr ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Download className="size-3" />
+                  )}
+                </Button>
+              </div>
+              {prError && (
+                <p className="text-[10px] text-red-400 mt-1">{prError}</p>
+              )}
+            </div>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -406,7 +520,6 @@ export function HeaderControls({
   isConnected: boolean
 }) {
   const { editor, setEditor, editors, editorTypes } = useEditor()
-  const { loading: isFetching, performFetch } = useFetch()
 
   return (
     <div className="flex items-center gap-2">
@@ -432,25 +545,8 @@ export function HeaderControls({
         </SelectContent>
       </Select>
 
-      <Button
-        variant="outline"
-        size="sm"
-        className="gap-1.5 h-7"
-        onClick={() => performFetch()}
-        disabled={isFetching}
-        title="Fetch from remote"
-      >
-        {isFetching ? (
-          <Loader2 className="size-3.5 animate-spin" />
-        ) : (
-          <CloudDownload className="size-3.5" />
-        )}
-        <span className="text-xs">Fetch</span>
-      </Button>
-
-      <BranchSelector />
-      <RemoteDropdown />
-      <WorktreeDropdown />
+      <BranchesDropdown />
+      <GitActionsDropdown />
 
       <div className="flex items-center gap-1.5 pl-2 text-xs text-muted-foreground">
         <span

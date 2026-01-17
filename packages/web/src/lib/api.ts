@@ -108,6 +108,23 @@ async function getTauriListen() {
   return tauriListen
 }
 
+// Helper to build URLs with optional repoPath query param
+function buildUrl(basePath: string, params?: Record<string, string | number | undefined>, repoPath?: string): string {
+  const searchParams = new URLSearchParams()
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        searchParams.set(key, String(value))
+      }
+    }
+  }
+  if (repoPath) {
+    searchParams.set('repoPath', repoPath)
+  }
+  const queryString = searchParams.toString()
+  return queryString ? `${basePath}?${queryString}` : basePath
+}
+
 // API functions
 
 export async function setRepoPath(path: string): Promise<void> {
@@ -120,93 +137,91 @@ export async function setRepoPath(path: string): Promise<void> {
   }
 }
 
-export async function getCurrentDiff(): Promise<DiffResult> {
+export async function getCurrentDiff(repoPath?: string): Promise<DiffResult> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_get_diff_current', {}) as Promise<DiffResult>
+    return invoke('cmd_get_diff_current', { repoPath }) as Promise<DiffResult>
   } else {
-    const res = await fetch('/api/diff/current')
+    const res = await fetch(buildUrl('/api/diff/current', undefined, repoPath))
     if (!res.ok) throw new Error('Failed to fetch current diff')
     return res.json()
   }
 }
 
-export async function getFilePatch(path: string): Promise<string> {
+export async function getFilePatch(path: string, repoPath?: string): Promise<string> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_get_diff_file', { path }) as Promise<string>
+    return invoke('cmd_get_diff_file', { path, repoPath }) as Promise<string>
   } else {
-    const res = await fetch(`/api/diff/file?path=${encodeURIComponent(path)}`)
+    const res = await fetch(buildUrl('/api/diff/file', { path }, repoPath))
     if (!res.ok) throw new Error('Failed to fetch file patch')
     const data = await res.json()
     return data.patch
   }
 }
 
-export async function getCommits(page: number = 1, limit: number = 20): Promise<CommitHistory> {
+export async function getCommits(page: number = 1, limit: number = 20, repoPath?: string): Promise<CommitHistory> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_get_commits', { page, limit }) as Promise<CommitHistory>
+    return invoke('cmd_get_commits', { page, limit, repoPath }) as Promise<CommitHistory>
   } else {
-    const res = await fetch(`/api/commits?page=${page}&limit=${limit}`)
+    const res = await fetch(buildUrl('/api/commits', { page, limit }, repoPath))
     if (!res.ok) throw new Error('Failed to fetch commits')
     return res.json()
   }
 }
 
-export async function getCommitDiff(sha: string): Promise<CommitDiff> {
+export async function getCommitDiff(sha: string, repoPath?: string): Promise<CommitDiff> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_get_commit', { sha }) as Promise<CommitDiff>
+    return invoke('cmd_get_commit', { sha, repoPath }) as Promise<CommitDiff>
   } else {
-    const res = await fetch(`/api/commits/${sha}/diff`)
+    const res = await fetch(buildUrl(`/api/commits/${sha}/diff`, undefined, repoPath))
     if (!res.ok) throw new Error('Failed to fetch commit diff')
     return res.json()
   }
 }
 
-export async function getBranches(): Promise<BranchList> {
+export async function getBranches(repoPath?: string): Promise<BranchList> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_get_branch_list', {}) as Promise<BranchList>
+    return invoke('cmd_get_branch_list', { repoPath }) as Promise<BranchList>
   } else {
-    const res = await fetch('/api/branches')
+    const res = await fetch(buildUrl('/api/branches', undefined, repoPath))
     if (!res.ok) throw new Error('Failed to fetch branches')
     return res.json()
   }
 }
 
-export async function compareBranches(base: string, head: string): Promise<CompareBranchesResult> {
+export async function compareBranches(base: string, head: string, repoPath?: string): Promise<CompareBranchesResult> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_compare_branch', { base, head }) as Promise<CompareBranchesResult>
+    return invoke('cmd_compare_branch', { base, head, repoPath }) as Promise<CompareBranchesResult>
   } else {
-    const res = await fetch(`/api/branches/compare?base=${encodeURIComponent(base)}&head=${encodeURIComponent(head)}`)
+    const res = await fetch(buildUrl('/api/branches/compare', { base, head }, repoPath))
     if (!res.ok) throw new Error('Failed to compare branches')
     return res.json()
   }
 }
 
-export async function getFileContents(path: string, ref?: string): Promise<string> {
+export async function getFileContents(path: string, ref?: string, repoPath?: string): Promise<string> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_get_file', { path, gitRef: ref }) as Promise<string>
+    return invoke('cmd_get_file', { path, gitRef: ref, repoPath }) as Promise<string>
   } else {
-    const params = new URLSearchParams({ path })
-    if (ref) params.set('ref', ref)
-    const res = await fetch(`/api/branches/file?${params}`)
+    const res = await fetch(buildUrl('/api/branches/file', { path, ref }, repoPath))
     if (!res.ok) throw new Error('Failed to fetch file contents')
     const data = await res.json()
     return data.content
   }
 }
 
-export async function getRemoteInfo(): Promise<RemoteInfo | null> {
+export async function getRemoteInfo(repoPath?: string): Promise<RemoteInfo | null> {
   if (isTauri()) {
     const invoke = await getTauriInvoke()
-    return invoke('cmd_get_remote', {}) as Promise<RemoteInfo | null>
+    return invoke('cmd_get_remote', { repoPath }) as Promise<RemoteInfo | null>
   } else {
-    const res = await fetch('/api/branches/remote')
+    const res = await fetch(buildUrl('/api/branches/remote', undefined, repoPath))
     if (!res.ok) return null
     const data = await res.json()
     return data.remote
@@ -414,4 +429,166 @@ export async function switchWorktree(path: string): Promise<boolean> {
     }
     return true
   }
+}
+
+export interface CheckoutPRResult {
+  success: boolean
+  prNumber: number
+  branchName: string
+  message: string
+}
+
+export async function checkoutPR(prNumber: number, remote = 'origin'): Promise<CheckoutPRResult> {
+  if (isTauri()) {
+    // Not implemented in Tauri yet
+    throw new Error('checkoutPR is not yet available in Tauri mode')
+  } else {
+    const res = await fetch('/api/branches/checkout-pr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prNumber, remote }),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Failed to checkout PR' }))
+      throw new Error(error.error || 'Failed to checkout PR')
+    }
+    return res.json()
+  }
+}
+
+export interface OpenPRWorktreeResult {
+  success: boolean
+  prNumber: number
+  branchName: string
+  worktreePath: string
+  message: string
+}
+
+/**
+ * Opens a PR in a new worktree, allowing it to be viewed in a separate tab
+ * without affecting the current working directory.
+ */
+export async function openPRWorktree(prNumber: number, remote = 'origin'): Promise<OpenPRWorktreeResult> {
+  if (isTauri()) {
+    throw new Error('openPRWorktree is not yet available in Tauri mode')
+  } else {
+    const res = await fetch('/api/branches/open-pr-worktree', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prNumber, remote }),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Failed to open PR worktree' }))
+      throw new Error(error.error || 'Failed to open PR worktree')
+    }
+    return res.json()
+  }
+}
+
+/**
+ * Closes a PR worktree and cleans up the temporary directory.
+ * Should be called when closing a PR tab.
+ */
+export async function closePRWorktree(prNumber: number): Promise<{ success: boolean; message: string }> {
+  if (isTauri()) {
+    throw new Error('closePRWorktree is not yet available in Tauri mode')
+  } else {
+    const res = await fetch('/api/branches/close-pr-worktree', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prNumber }),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Failed to close PR worktree' }))
+      throw new Error(error.error || 'Failed to close PR worktree')
+    }
+    return res.json()
+  }
+}
+
+// =============================================================================
+// PULL REQUEST API
+// =============================================================================
+
+export interface PRInfo {
+  number: number
+  title: string
+  state: 'open' | 'closed' | 'merged'
+  author: string
+  headRef: string
+  baseRef: string
+  updatedAt: string
+  additions?: number
+  deletions?: number
+  changedFiles?: number
+}
+
+export interface PRListResult {
+  prs: PRInfo[]
+  provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown'
+  hasGhCli: boolean
+}
+
+export interface PRDiff {
+  pr: PRInfo
+  files: FileDiffInfo[]
+  stats: DiffStats
+  commitCount: number
+}
+
+/**
+ * List pull requests from the remote repository.
+ * Uses GitHub CLI when available, falls back to git ls-remote.
+ */
+export async function listPRs(
+  options?: { state?: 'open' | 'closed' | 'all'; limit?: number },
+  repoPath?: string
+): Promise<PRListResult> {
+  if (isTauri()) {
+    throw new Error('listPRs is not yet available in Tauri mode')
+  }
+
+  const params: Record<string, string | number> = {}
+  if (options?.state) params.state = options.state
+  if (options?.limit) params.limit = options.limit
+
+  const res = await fetch(buildUrl('/api/prs', params, repoPath))
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to list PRs' }))
+    throw new Error(error.error || 'Failed to list PRs')
+  }
+  return res.json()
+}
+
+/**
+ * Get info for a specific pull request.
+ */
+export async function getPRInfo(prNumber: number, repoPath?: string): Promise<PRInfo> {
+  if (isTauri()) {
+    throw new Error('getPRInfo is not yet available in Tauri mode')
+  }
+
+  const res = await fetch(buildUrl(`/api/prs/${prNumber}`, undefined, repoPath))
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to get PR info' }))
+    throw new Error(error.error || 'Failed to get PR info')
+  }
+  return res.json()
+}
+
+/**
+ * Get the diff for a pull request.
+ * Fetches the PR ref and compares against base branch without checkout.
+ */
+export async function getPRDiff(prNumber: number, repoPath?: string): Promise<PRDiff> {
+  if (isTauri()) {
+    throw new Error('getPRDiff is not yet available in Tauri mode')
+  }
+
+  const res = await fetch(buildUrl(`/api/prs/${prNumber}/diff`, undefined, repoPath))
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to get PR diff' }))
+    throw new Error(error.error || 'Failed to get PR diff')
+  }
+  return res.json()
 }

@@ -1,7 +1,7 @@
 import simpleGit, { type SimpleGit } from 'simple-git'
 import { stat, readFile } from 'fs/promises'
 import { join } from 'path'
-import type { DiffResult, FileDiffInfo, CommitInfo, BranchInfo, WorktreeInfo } from './types'
+import type { DiffResult, FileDiffInfo, CommitInfo, BranchInfo, WorktreeInfo, PRInfo, PRListResult, PRDiffResult } from './types'
 
 export * from './types'
 
@@ -679,5 +679,272 @@ export async function closePRWorktree(git: SimpleGit, prNumber: number): Promise
       success: false,
       message: `Failed to remove worktree: ${e instanceof Error ? e.message : 'Unknown error'}`,
     }
+  }
+}
+
+// =============================================================================
+// PULL REQUEST OPERATIONS
+// =============================================================================
+
+/**
+ * Check if GitHub CLI is available
+ */
+async function hasGhCli(): Promise<boolean> {
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+
+  try {
+    await execAsync('gh --version')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Execute gh CLI command and parse JSON output
+ */
+async function ghCommand<T>(args: string[], cwd: string): Promise<T> {
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+
+  const { stdout } = await execAsync(`gh ${args.join(' ')}`, { cwd })
+  return JSON.parse(stdout)
+}
+
+/**
+ * List PRs from GitHub using gh CLI, with fallback to git ls-remote
+ */
+export async function listPRs(
+  git: SimpleGit,
+  options: { state?: 'open' | 'closed' | 'all'; limit?: number } = {}
+): Promise<PRListResult> {
+  const { state = 'open', limit = 50 } = options
+  const repoRoot = (await git.revparse(['--show-toplevel'])).trim()
+  const remoteInfo = await getRemoteUrl(git)
+
+  if (!remoteInfo || remoteInfo.provider !== 'github') {
+    return {
+      prs: [],
+      provider: remoteInfo?.provider || 'unknown',
+      hasGhCli: false,
+    }
+  }
+
+  // Try gh CLI first
+  const ghAvailable = await hasGhCli()
+  if (ghAvailable) {
+    try {
+      const stateArg = state === 'all' ? '--state all' : `--state ${state}`
+      const ghPrs = await ghCommand<Array<{
+        number: number
+        title: string
+        state: string
+        author: { login: string }
+        headRefName: string
+        baseRefName: string
+        updatedAt: string
+        additions: number
+        deletions: number
+        changedFiles: number
+      }>>(
+        ['pr', 'list', stateArg, `--limit ${limit}`, '--json', 'number,title,state,author,headRefName,baseRefName,updatedAt,additions,deletions,changedFiles'],
+        repoRoot
+      )
+
+      const prs: PRInfo[] = ghPrs.map(pr => ({
+        number: pr.number,
+        title: pr.title,
+        state: pr.state.toLowerCase() as PRInfo['state'],
+        author: pr.author.login,
+        headRef: pr.headRefName,
+        baseRef: pr.baseRefName,
+        updatedAt: pr.updatedAt,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        changedFiles: pr.changedFiles,
+      }))
+
+      return { prs, provider: 'github', hasGhCli: true }
+    } catch (e) {
+      // gh CLI failed (e.g., auth issues), fall through to git ls-remote
+    }
+  }
+
+  // Fallback: git ls-remote (limited metadata - only PR numbers)
+  try {
+    const lsRemoteOutput = await git.raw(['ls-remote', 'origin', 'refs/pull/*/head'])
+    const prNumbers: number[] = []
+
+    for (const line of lsRemoteOutput.trim().split('\n')) {
+      if (!line) continue
+      const match = line.match(/refs\/pull\/(\d+)\/head/)
+      if (match) {
+        prNumbers.push(parseInt(match[1], 10))
+      }
+    }
+
+    // Sort descending (newest PRs first) and limit
+    prNumbers.sort((a, b) => b - a)
+    const limitedNumbers = prNumbers.slice(0, limit)
+
+    // Create minimal PR info (no title, author, etc.)
+    const prs: PRInfo[] = limitedNumbers.map(num => ({
+      number: num,
+      title: `Pull Request #${num}`,
+      state: 'open', // We can't know the state without gh CLI
+      author: 'unknown',
+      headRef: '',
+      baseRef: '',
+      updatedAt: '',
+    }))
+
+    return { prs, provider: 'github', hasGhCli: false }
+  } catch {
+    return { prs: [], provider: 'github', hasGhCli: false }
+  }
+}
+
+/**
+ * Get info for a specific PR using gh CLI
+ */
+export async function getPRInfo(git: SimpleGit, prNumber: number): Promise<PRInfo | null> {
+  const repoRoot = (await git.revparse(['--show-toplevel'])).trim()
+  const ghAvailable = await hasGhCli()
+
+  if (!ghAvailable) {
+    // Return minimal info without gh CLI
+    return {
+      number: prNumber,
+      title: `Pull Request #${prNumber}`,
+      state: 'open',
+      author: 'unknown',
+      headRef: '',
+      baseRef: '',
+      updatedAt: '',
+    }
+  }
+
+  try {
+    const pr = await ghCommand<{
+      number: number
+      title: string
+      state: string
+      author: { login: string }
+      headRefName: string
+      baseRefName: string
+      updatedAt: string
+      additions: number
+      deletions: number
+      changedFiles: number
+    }>(
+      ['pr', 'view', String(prNumber), '--json', 'number,title,state,author,headRefName,baseRefName,updatedAt,additions,deletions,changedFiles'],
+      repoRoot
+    )
+
+    return {
+      number: pr.number,
+      title: pr.title,
+      state: pr.state.toLowerCase() as PRInfo['state'],
+      author: pr.author.login,
+      headRef: pr.headRefName,
+      baseRef: pr.baseRefName,
+      updatedAt: pr.updatedAt,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      changedFiles: pr.changedFiles,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Get PR diff by fetching the PR ref and comparing against base.
+ * Does NOT checkout the PR - just fetches to FETCH_HEAD.
+ */
+export async function getPRDiff(
+  git: SimpleGit,
+  prNumber: number,
+  remote = 'origin'
+): Promise<PRDiffResult> {
+  const MAX_PATCH_SIZE = 50000
+
+  // Get PR info first (for base branch)
+  const prInfo = await getPRInfo(git, prNumber)
+  if (!prInfo) {
+    throw new Error(`PR #${prNumber} not found`)
+  }
+
+  // Fetch the PR ref without creating a local branch
+  // This puts it in FETCH_HEAD
+  try {
+    await git.fetch([remote, `pull/${prNumber}/head`])
+  } catch {
+    throw new Error(`Failed to fetch PR #${prNumber}. Make sure the PR exists and you have access.`)
+  }
+
+  // Determine base ref - use PR's base branch or default to main/master
+  let baseRef = prInfo.baseRef
+  if (!baseRef) {
+    // Try to find main or master
+    const branches = await getBranches(git)
+    const mainBranch = branches.branches.find(b => b.name === 'main' || b.name === 'master')
+    baseRef = mainBranch?.name || 'main'
+  }
+
+  // Ensure we're comparing against remote base (in case local is behind)
+  const remoteBase = `${remote}/${baseRef}`
+
+  // Get diff between base and FETCH_HEAD
+  const [countResult, diffSummary] = await Promise.all([
+    git.raw(['rev-list', '--count', `${remoteBase}..FETCH_HEAD`]).catch(() => '0'),
+    git.diffSummary([remoteBase, 'FETCH_HEAD']),
+  ])
+  const commitCount = parseInt(countResult.trim(), 10)
+
+  // Fetch all patches in parallel
+  const patchPromises = diffSummary.files.map(async (file) => {
+    const rawPatch = await git.diff([remoteBase, 'FETCH_HEAD', '--', file.file]).catch(() => '')
+    return { file, rawPatch }
+  })
+  const patchResults = await Promise.all(patchPromises)
+
+  const files: FileDiffInfo[] = []
+  let totalAdditions = 0
+  let totalDeletions = 0
+
+  for (const { file, rawPatch } of patchResults) {
+    const { additions, deletions } = getFileStats(file as any)
+    totalAdditions += additions
+    totalDeletions += deletions
+
+    const isLarge = rawPatch.length > MAX_PATCH_SIZE
+    const patch = isLarge ? '' : rawPatch
+
+    const fileAny = file as any
+    const status = fileAny.deleted ? 'deleted' : fileAny.insertion ? 'added' : 'modified'
+
+    files.push({
+      path: file.file,
+      status,
+      additions,
+      deletions,
+      patch,
+      isLarge,
+    })
+  }
+
+  return {
+    pr: prInfo,
+    files,
+    stats: {
+      additions: totalAdditions,
+      deletions: totalDeletions,
+      files: files.length,
+    },
+    commitCount,
   }
 }

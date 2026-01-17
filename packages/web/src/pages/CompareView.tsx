@@ -3,6 +3,7 @@ import { useBranches, useCompareBranches } from '../hooks/useBranches'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useVimNavigation } from '../hooks/useVimNavigation'
 import { useEditor } from '../hooks/useEditor'
+import { useTabs } from '../contexts/TabContext'
 import { HeaderContent, type DiffStyle } from '../components/Header'
 import { BranchSelector } from '../components/BranchSelector'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
@@ -10,14 +11,64 @@ import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../componen
 import { Separator } from '../components/ui/separator'
 
 export function CompareView() {
-  const { data: branchData, loading: branchesLoading } = useBranches()
+  const { activeTab, updateTabViewState, updateTabContext } = useTabs()
+  const repoPath = activeTab?.repoPath
+  const activeTabId = activeTab?.id
+
+  const { data: branchData, loading: branchesLoading } = useBranches(repoPath)
   const { isConnected } = useWebSocket()
   const { openInEditor } = useEditor()
 
-  const [baseBranch, setBaseBranch] = useState<string>('')
-  const [headBranch, setHeadBranch] = useState<string>('')
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [diffStyle, setDiffStyle] = useState<DiffStyle>('split')
+  // Local UI state
+  const [baseBranch, setBaseBranch] = useState<string>(
+    activeTab?.context.baseBranch ?? ''
+  )
+  const [headBranch, setHeadBranch] = useState<string>(
+    activeTab?.context.headBranch ?? ''
+  )
+  const [selectedFile, setSelectedFile] = useState<string | null>(
+    activeTab?.viewState.selectedFile ?? null
+  )
+  const [diffStyle, setDiffStyle] = useState<DiffStyle>(
+    activeTab?.viewState.diffStyle ?? 'split'
+  )
+
+  // Track previous tab to detect switches and skip saving during switch
+  const prevTabIdRef = useRef(activeTabId)
+  const isTabSwitchingRef = useRef(false)
+
+  // Sync FROM tab when switching tabs (restore tab's saved state)
+  useEffect(() => {
+    if (activeTabId && activeTabId !== prevTabIdRef.current) {
+      isTabSwitchingRef.current = true
+      prevTabIdRef.current = activeTabId
+
+      if (activeTab) {
+        setBaseBranch(activeTab.context.baseBranch ?? '')
+        setHeadBranch(activeTab.context.headBranch ?? '')
+        setSelectedFile(activeTab.viewState.selectedFile)
+        setDiffStyle(activeTab.viewState.diffStyle)
+      }
+
+      requestAnimationFrame(() => {
+        isTabSwitchingRef.current = false
+      })
+    }
+  }, [activeTabId, activeTab])
+
+  // Sync TO tab when local state changes (but not during tab switch)
+  useEffect(() => {
+    if (activeTabId && !isTabSwitchingRef.current) {
+      updateTabViewState(activeTabId, { selectedFile, diffStyle })
+    }
+  }, [selectedFile, diffStyle, activeTabId, updateTabViewState])
+
+  // Sync branch context changes back to tab (but not during tab switch)
+  useEffect(() => {
+    if (activeTabId && !isTabSwitchingRef.current) {
+      updateTabContext(activeTabId, { baseBranch, headBranch })
+    }
+  }, [baseBranch, headBranch, activeTabId, updateTabContext])
 
   const contentRef = useRef<HTMLElement>(null)
   const diffListRef = useRef<VirtualizedDiffListHandle>(null)
@@ -32,7 +83,8 @@ export function CompareView() {
 
   const { data: compareData, loading: compareLoading, error } = useCompareBranches(
     baseBranch && headBranch && baseBranch !== headBranch ? baseBranch : null,
-    baseBranch && headBranch && baseBranch !== headBranch ? headBranch : null
+    baseBranch && headBranch && baseBranch !== headBranch ? headBranch : null,
+    repoPath
   )
 
   const handleSelectFile = useCallback((path: string) => {
@@ -83,7 +135,7 @@ export function CompareView() {
         loading={compareLoading}
         headerContent={headerContent}
       />
-      <SidebarInset className="h-svh overflow-hidden">
+      <SidebarInset className="h-full overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />

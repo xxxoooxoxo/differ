@@ -4,7 +4,11 @@ import { CurrentChanges } from './pages/CurrentChanges'
 import { HistoryPage } from './pages/HistoryPage'
 import { CommitView } from './pages/CommitView'
 import { CompareView } from './pages/CompareView'
+import { PRListPage } from './pages/PRListPage'
+import { PRView } from './pages/PRView'
 import { WelcomePage } from './pages/WelcomePage'
+import { TabProvider, useTabs } from './contexts/TabContext'
+import { TabBar } from './components/TabBar'
 import { isTauri, selectDirectory, setRepoPath as setRepoPathApi } from './lib/api'
 
 function AppRoutes() {
@@ -14,7 +18,19 @@ function AppRoutes() {
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/commit/:sha" element={<CommitView />} />
       <Route path="/compare" element={<CompareView />} />
+      <Route path="/prs" element={<PRListPage />} />
+      <Route path="/prs/:number" element={<PRView />} />
     </Routes>
+  )
+}
+
+// Wrapper that uses activeTabId as key to force re-mount on tab switch
+function KeyedRoutes() {
+  const { activeTabId } = useTabs()
+  return (
+    <div key={activeTabId} className="h-full">
+      <AppRoutes />
+    </div>
   )
 }
 
@@ -89,7 +105,14 @@ export function App() {
 
   return (
     <BrowserRouter>
-      <AppRoutes />
+      <TabProvider initialRepoPath={repoPath || undefined}>
+        <div className="flex h-screen flex-col">
+          <TabBar />
+          <div className="flex-1 min-h-0">
+            <KeyedRoutes />
+          </div>
+        </div>
+      </TabProvider>
     </BrowserRouter>
   )
 }

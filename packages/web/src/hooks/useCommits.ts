@@ -10,7 +10,7 @@ interface CommitsResponse {
   totalPages: number
 }
 
-export function useCommits(initialPage = 1, limit = 20) {
+export function useCommits(initialPage = 1, limit = 20, repoPath?: string) {
   const [data, setData] = useState<CommitsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +22,7 @@ export function useCommits(initialPage = 1, limit = 20) {
       setLoading(true)
       setError(null)
 
-      const result = await getCommits(pageNum, limit)
+      const result = await getCommits(pageNum, limit, repoPath)
       const totalPages = Math.ceil(result.total / limit)
       totalPagesRef.current = totalPages
 
@@ -37,7 +37,7 @@ export function useCommits(initialPage = 1, limit = 20) {
     } finally {
       setLoading(false)
     }
-  }, [limit])
+  }, [limit, repoPath])
 
   useEffect(() => {
     fetchCommits(page)

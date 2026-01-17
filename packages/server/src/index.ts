@@ -7,6 +7,7 @@ import { createGitClient } from './git'
 import { createDiffRoutes } from './routes/diff'
 import { createCommitRoutes } from './routes/commits'
 import { createBranchRoutes } from './routes/branches'
+import { createPRRoutes } from './routes/prs'
 import { createConfigRoutes } from './routes/config'
 import { createWorktreeRoutes } from './routes/worktrees'
 import { createFileWatcher, createWebSocketHandlers, type FileWatcher } from './routes/ws'
@@ -63,6 +64,7 @@ export function createServer(serverConfig: ServerConfig) {
   app.route('/api/diff', createDiffRoutes(getGit))
   app.route('/api/commits', createCommitRoutes(getGit))
   app.route('/api/branches', createBranchRoutes(getGit))
+  app.route('/api/prs', createPRRoutes(getGit))
   app.route('/api/config', createConfigRoutes(initialRepoPath, differConfig))
   app.route('/api/worktrees', createWorktreeRoutes(getGit, state, createGitClient, createFileWatcher))
 

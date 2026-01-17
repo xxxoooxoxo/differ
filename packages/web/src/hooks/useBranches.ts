@@ -9,7 +9,7 @@ import {
 
 export type { BranchInfo }
 
-export function useBranches() {
+export function useBranches(repoPath?: string) {
   const [data, setData] = useState<BranchList | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -19,14 +19,14 @@ export function useBranches() {
       setLoading(true)
       setError(null)
 
-      const result = await getBranches()
+      const result = await getBranches(repoPath)
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [repoPath])
 
   useEffect(() => {
     fetchBranches()
@@ -35,7 +35,7 @@ export function useBranches() {
   return { data, loading, error, refetch: fetchBranches }
 }
 
-export function useCompareBranches(base: string | null, head: string | null) {
+export function useCompareBranches(base: string | null, head: string | null, repoPath?: string) {
   const [data, setData] = useState<CompareBranchesResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,14 +50,14 @@ export function useCompareBranches(base: string | null, head: string | null) {
       setLoading(true)
       setError(null)
 
-      const result = await compareBranches(base, head)
+      const result = await compareBranches(base, head, repoPath)
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
-  }, [base, head])
+  }, [base, head, repoPath])
 
   useEffect(() => {
     fetchComparison()

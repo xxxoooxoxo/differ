@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useCommitDiff } from '../hooks/useGitDiff'
+import { usePRDiff } from '../hooks/usePRs'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useVimNavigation } from '../hooks/useVimNavigation'
 import { useEditor } from '../hooks/useEditor'
@@ -9,15 +9,20 @@ import { HeaderContent, type DiffStyle } from '../components/Header'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
 import { Separator } from '../components/ui/separator'
-import { ArrowLeft } from 'lucide-react'
+import { Button } from '../components/ui/button'
+import { ArrowLeft, GitPullRequest, RefreshCw, GitBranch, ExternalLink } from 'lucide-react'
+import { cn } from '../lib/utils'
+import { getRemoteInfo } from '../lib/api'
 
-export function CommitView() {
-  const { sha } = useParams<{ sha: string }>()
+export function PRView() {
+  const { number } = useParams<{ number: string }>()
+  const prNumber = number ? parseInt(number, 10) : null
+
   const { activeTab, updateTabViewState } = useTabs()
   const repoPath = activeTab?.repoPath
   const activeTabId = activeTab?.id
 
-  const { data, loading, error } = useCommitDiff(sha || null, repoPath)
+  const { data, loading, error, refetch } = usePRDiff(prNumber, repoPath)
   const { isConnected } = useWebSocket()
   const { openInEditor } = useEditor()
 
@@ -28,12 +33,24 @@ export function CommitView() {
   const [diffStyle, setDiffStyle] = useState<DiffStyle>(
     activeTab?.viewState.diffStyle ?? 'split'
   )
+  const [prUrl, setPrUrl] = useState<string | null>(null)
 
-  // Track previous tab to detect switches and skip saving during switch
+  // Fetch remote info to build PR URL
+  useEffect(() => {
+    if (prNumber) {
+      getRemoteInfo(repoPath).then((remote) => {
+        if (remote && remote.provider === 'github') {
+          setPrUrl(`https://github.com/${remote.owner}/${remote.repo}/pull/${prNumber}`)
+        }
+      })
+    }
+  }, [prNumber, repoPath])
+
+  // Track previous tab to detect switches
   const prevTabIdRef = useRef(activeTabId)
   const isTabSwitchingRef = useRef(false)
 
-  // Sync FROM tab when switching tabs (restore tab's saved state)
+  // Sync FROM tab when switching tabs
   useEffect(() => {
     if (activeTabId && activeTabId !== prevTabIdRef.current) {
       isTabSwitchingRef.current = true
@@ -50,7 +67,7 @@ export function CommitView() {
     }
   }, [activeTabId, activeTab])
 
-  // Sync TO tab when local state changes (but not during tab switch)
+  // Sync TO tab when local state changes
   useEffect(() => {
     if (activeTabId && !isTabSwitchingRef.current) {
       updateTabViewState(activeTabId, { selectedFile, diffStyle })
@@ -60,7 +77,7 @@ export function CommitView() {
   const contentRef = useRef<HTMLElement>(null)
   const diffListRef = useRef<VirtualizedDiffListHandle>(null)
 
-  const commit = data?.commit
+  const pr = data?.pr
   const files = data?.files || []
 
   const { focusedIndex } = useVimNavigation({
@@ -75,13 +92,19 @@ export function CommitView() {
     diffListRef.current?.scrollToFile(path)
   }, [])
 
+  const stateColor = pr?.state === 'open'
+    ? 'text-green-500'
+    : pr?.state === 'merged'
+      ? 'text-purple-500'
+      : 'text-red-500'
+
   const headerContent = (
     <Link
-      to="/history"
+      to="/prs"
       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
     >
       <ArrowLeft className="size-3.5" />
-      Back to History
+      Back to PRs
     </Link>
   )
 
@@ -98,12 +121,18 @@ export function CommitView() {
           <div className="flex flex-1 items-center justify-center">
             <div className="text-center">
               <p className="text-sm text-muted-foreground mb-4">{error}</p>
-              <Link
-                to="/history"
-                className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-accent transition-colors"
-              >
-                Back to History
-              </Link>
+              <div className="flex gap-2 justify-center">
+                <Button variant="outline" size="sm" onClick={refetch}>
+                  <RefreshCw className="size-4 mr-2" />
+                  Retry
+                </Button>
+                <Link
+                  to="/prs"
+                  className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-accent transition-colors inline-flex items-center"
+                >
+                  Back to PRs
+                </Link>
+              </div>
             </div>
           </div>
         </SidebarInset>
@@ -127,10 +156,22 @@ export function CommitView() {
           <Separator orientation="vertical" className="mr-2 h-4" />
           <HeaderContent
             isConnected={isConnected}
-            stats={commit?.stats}
+            stats={data?.stats}
             diffStyle={diffStyle}
             onDiffStyleChange={setDiffStyle}
           />
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="ghost" size="icon" onClick={refetch} disabled={loading}>
+              <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
+            </Button>
+            {prUrl && (
+              <Button variant="ghost" size="icon" asChild>
+                <a href={prUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="size-4" />
+                </a>
+              </Button>
+            )}
+          </div>
         </header>
         <main className="flex-1 min-h-0 overflow-y-auto bg-secondary/30" ref={contentRef}>
           <div className="p-4">
@@ -138,16 +179,29 @@ export function CommitView() {
               <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
                 Loading...
               </div>
-            ) : commit ? (
+            ) : pr ? (
               <>
                 <div className="bg-card border border-border rounded-md p-3 mb-4">
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="font-mono text-foreground">{commit.shortSha}</span>
-                    <span className="text-muted-foreground">
-                      {commit.author} · {new Date(commit.date).toLocaleString()}
+                  <div className="flex items-center gap-2 mb-2">
+                    <GitPullRequest className={cn('size-4', stateColor)} />
+                    <span className="font-mono text-sm text-foreground">#{pr.number}</span>
+                    <span className={cn('text-xs font-medium capitalize px-1.5 py-0.5 rounded', stateColor, 'bg-current/10')}>
+                      {pr.state}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm text-foreground">{commit.message}</p>
+                  <p className="text-sm font-medium text-foreground mb-2">{pr.title}</p>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{pr.author}</span>
+                    {pr.baseRef && pr.headRef && (
+                      <span className="flex items-center gap-1">
+                        <GitBranch className="size-3" />
+                        {pr.baseRef} <span className="text-muted-foreground/50">&larr;</span> {pr.headRef}
+                      </span>
+                    )}
+                    {data.commitCount > 0 && (
+                      <span>{data.commitCount} commit{data.commitCount !== 1 ? 's' : ''}</span>
+                    )}
+                  </div>
                 </div>
                 <VirtualizedDiffList
                   ref={diffListRef}

@@ -5,7 +5,9 @@ interface UseWebSocketReturn {
   isConnected: boolean
 }
 
-export function useWebSocket(onFileChange?: () => void): UseWebSocketReturn {
+// repoPath parameter is reserved for future per-tab WebSocket connections
+// Currently all tabs share the same WebSocket connection
+export function useWebSocket(onFileChange?: () => void, _repoPath?: string): UseWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false)
   const onFileChangeRef = useRef(onFileChange)
 

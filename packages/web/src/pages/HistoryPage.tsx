@@ -1,5 +1,6 @@
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useCommits } from '../hooks/useCommits'
+import { useTabs } from '../contexts/TabContext'
 import { HeaderContent } from '../components/Header'
 import { CommitList } from '../components/CommitList'
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
@@ -14,7 +15,10 @@ import {
 import { Separator } from '../components/ui/separator'
 
 export function HistoryPage() {
-  const { data, loading, error, page, goToPage } = useCommits()
+  const { activeTab } = useTabs()
+  const repoPath = activeTab?.repoPath
+
+  const { data, loading, error, page, goToPage } = useCommits(1, 20, repoPath)
   const { isConnected } = useWebSocket()
 
   if (error) {

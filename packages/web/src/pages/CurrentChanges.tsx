@@ -4,6 +4,7 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import { useVimNavigation } from '../hooks/useVimNavigation'
 import { useEditor } from '../hooks/useEditor'
 import { useDiffFilters } from '../hooks/useDiffFilters'
+import { useTabs } from '../contexts/TabContext'
 import { HeaderContent, type DiffStyle } from '../components/Header'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
@@ -11,10 +12,51 @@ import { DiffToolbar } from '../components/DiffToolbar'
 import { Separator } from '../components/ui/separator'
 
 export function CurrentChanges() {
-  const { data, loading, error, refetch } = useGitDiff()
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [diffStyle, setDiffStyle] = useState<DiffStyle>('split')
+  const { activeTab, updateTabViewState } = useTabs()
+  const repoPath = activeTab?.repoPath
+  const activeTabId = activeTab?.id
+
+  const { data, loading, error, refetch } = useGitDiff(repoPath)
+
+  // Local UI state
+  const [selectedFile, setSelectedFile] = useState<string | null>(
+    activeTab?.viewState.selectedFile ?? null
+  )
+  const [diffStyle, setDiffStyle] = useState<DiffStyle>(
+    activeTab?.viewState.diffStyle ?? 'split'
+  )
   const [showFilterBar, setShowFilterBar] = useState(true)
+
+  // Track previous tab to detect switches and skip saving during switch
+  const prevTabIdRef = useRef(activeTabId)
+  const isTabSwitchingRef = useRef(false)
+
+  // Sync FROM tab when switching tabs (restore tab's saved state)
+  useEffect(() => {
+    if (activeTabId && activeTabId !== prevTabIdRef.current) {
+      // Mark that we're switching tabs - prevents sync TO from saving stale state
+      isTabSwitchingRef.current = true
+      prevTabIdRef.current = activeTabId
+
+      // Restore state from new tab
+      if (activeTab) {
+        setSelectedFile(activeTab.viewState.selectedFile)
+        setDiffStyle(activeTab.viewState.diffStyle)
+      }
+
+      // Clear the flag after state updates have been applied
+      requestAnimationFrame(() => {
+        isTabSwitchingRef.current = false
+      })
+    }
+  }, [activeTabId, activeTab])
+
+  // Sync TO tab when local state changes (but not during tab switch)
+  useEffect(() => {
+    if (activeTabId && !isTabSwitchingRef.current) {
+      updateTabViewState(activeTabId, { selectedFile, diffStyle })
+    }
+  }, [selectedFile, diffStyle, activeTabId, updateTabViewState])
 
   const { isConnected } = useWebSocket(refetch)
   const { openInEditor } = useEditor()
@@ -99,7 +141,7 @@ export function CurrentChanges() {
         title="Files"
         loading={loading}
       />
-      <SidebarInset className="h-svh overflow-hidden">
+      <SidebarInset className="h-full overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />

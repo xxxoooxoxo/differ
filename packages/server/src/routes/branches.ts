@@ -1,14 +1,17 @@
 import { Hono } from 'hono'
 import type { SimpleGit } from 'simple-git'
-import { getBranches, compareBranches, getFileContents, getRemoteUrl, performFetch } from '../git'
+import { getBranches, compareBranches, getFileContents, getRemoteUrl, performFetch, checkoutPR, openPRWorktree, closePRWorktree } from '../git'
+import { getGitForRequest } from './utils'
 
 export function createBranchRoutes(getGit: () => SimpleGit) {
   const app = new Hono()
 
   // GET /api/branches - List all branches
+  // Supports optional ?repoPath= query param for multi-tab support
   app.get('/', async (c) => {
     try {
-      const result = await getBranches(getGit())
+      const git = getGitForRequest(c, getGit)
+      const result = await getBranches(git)
       c.header('Cache-Control', 'public, max-age=60')
       return c.json(result)
     } catch (error) {
@@ -18,6 +21,7 @@ export function createBranchRoutes(getGit: () => SimpleGit) {
   })
 
   // GET /api/branches/compare?base=...&head=... - Compare two branches
+  // Supports optional ?repoPath= query param for multi-tab support
   app.get('/compare', async (c) => {
     try {
       const base = c.req.query('base')
@@ -27,7 +31,8 @@ export function createBranchRoutes(getGit: () => SimpleGit) {
         return c.json({ error: 'base and head query parameters are required' }, 400)
       }
 
-      const result = await compareBranches(getGit(), base, head)
+      const git = getGitForRequest(c, getGit)
+      const result = await compareBranches(git, base, head)
       return c.json(result)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to compare branches'
@@ -36,6 +41,7 @@ export function createBranchRoutes(getGit: () => SimpleGit) {
   })
 
   // GET /api/file - Get file contents
+  // Supports optional ?repoPath= query param for multi-tab support
   app.get('/file', async (c) => {
     try {
       const path = c.req.query('path')
@@ -45,7 +51,8 @@ export function createBranchRoutes(getGit: () => SimpleGit) {
         return c.json({ error: 'path parameter is required' }, 400)
       }
 
-      const content = await getFileContents(getGit(), path, ref || undefined)
+      const git = getGitForRequest(c, getGit)
+      const content = await getFileContents(git, path, ref || undefined)
       return c.json({ content })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get file contents'
@@ -54,9 +61,11 @@ export function createBranchRoutes(getGit: () => SimpleGit) {
   })
 
   // GET /api/branches/remote - Get remote origin info
+  // Supports optional ?repoPath= query param for multi-tab support
   app.get('/remote', async (c) => {
     try {
-      const remote = await getRemoteUrl(getGit())
+      const git = getGitForRequest(c, getGit)
+      const remote = await getRemoteUrl(git)
       c.header('Cache-Control', 'public, max-age=300')
       return c.json({ remote })
     } catch (error) {
@@ -66,14 +75,76 @@ export function createBranchRoutes(getGit: () => SimpleGit) {
   })
 
   // POST /api/branches/fetch - Fetch from remote
+  // Supports optional ?repoPath= query param for multi-tab support
   app.post('/fetch', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}))
       const remote = (body as { remote?: string }).remote || 'origin'
-      const result = await performFetch(getGit(), remote)
+      const git = getGitForRequest(c, getGit)
+      const result = await performFetch(git, remote)
       return c.json(result)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch from remote'
+      return c.json({ error: message }, 500)
+    }
+  })
+
+  // POST /api/branches/checkout-pr - Checkout a PR by number
+  // Supports optional ?repoPath= query param for multi-tab support
+  app.post('/checkout-pr', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}))
+      const prNumber = (body as { prNumber?: number }).prNumber
+      const remote = (body as { remote?: string }).remote || 'origin'
+
+      if (!prNumber || typeof prNumber !== 'number') {
+        return c.json({ error: 'prNumber is required and must be a number' }, 400)
+      }
+
+      const git = getGitForRequest(c, getGit)
+      const result = await checkoutPR(git, prNumber, remote)
+      return c.json(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to checkout PR'
+      return c.json({ error: message }, 500)
+    }
+  })
+
+  // POST /api/branches/open-pr-worktree - Open a PR in a new worktree (for tab isolation)
+  app.post('/open-pr-worktree', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}))
+      const prNumber = (body as { prNumber?: number }).prNumber
+      const remote = (body as { remote?: string }).remote || 'origin'
+
+      if (!prNumber || typeof prNumber !== 'number') {
+        return c.json({ error: 'prNumber is required and must be a number' }, 400)
+      }
+
+      const git = getGitForRequest(c, getGit)
+      const result = await openPRWorktree(git, prNumber, remote)
+      return c.json(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to open PR worktree'
+      return c.json({ error: message }, 500)
+    }
+  })
+
+  // POST /api/branches/close-pr-worktree - Close a PR worktree (cleanup on tab close)
+  app.post('/close-pr-worktree', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}))
+      const prNumber = (body as { prNumber?: number }).prNumber
+
+      if (!prNumber || typeof prNumber !== 'number') {
+        return c.json({ error: 'prNumber is required and must be a number' }, 400)
+      }
+
+      const git = getGitForRequest(c, getGit)
+      const result = await closePRWorktree(git, prNumber)
+      return c.json(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to close PR worktree'
       return c.json({ error: message }, 500)
     }
   })
