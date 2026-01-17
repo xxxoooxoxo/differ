@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" width="128" height="128" alt="Differ Logo">
+</p>
+
 # differ
 
 The best diff viewer for working with AI.
