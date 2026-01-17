@@ -13,26 +13,42 @@ export function useGitDiff(repoPath?: string) {
   const [data, setData] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const isInitialLoadRef = useRef(true)
 
-  const fetchDiff = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
+  const fetchDiff = useCallback(
+    async (silent = false) => {
+      try {
+        // Only show loading state on initial load, not on refetches
+        if (!silent && isInitialLoadRef.current) {
+          setLoading(true)
+        }
+        setError(null)
 
-      const result = await getCurrentDiff(repoPath)
-      setData(result)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setLoading(false)
-    }
+        const result = await getCurrentDiff(repoPath)
+        setData(result)
+        isInitialLoadRef.current = false
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [repoPath]
+  )
+
+  // Reset initial load flag when repoPath changes
+  useEffect(() => {
+    isInitialLoadRef.current = true
   }, [repoPath])
 
   useEffect(() => {
     fetchDiff()
   }, [fetchDiff])
 
-  return { data, loading, error, refetch: fetchDiff }
+  // Refetch silently without loading state
+  const refetch = useCallback(() => fetchDiff(true), [fetchDiff])
+
+  return { data, loading, error, refetch }
 }
 
 export function useCommitDiff(sha: string | null, repoPath?: string) {
