@@ -87,9 +87,28 @@ export function createServer(serverConfig: ServerConfig) {
     // Static assets (js, css, etc.)
     app.use('/assets/*', serveStatic({ root: webDistPath }))
 
-    // Serve favicon and other root-level static files
-    app.get('/favicon*.png', serveStatic({ root: webDistPath }))
-    app.get('/favicon.ico', serveStatic({ root: webDistPath }))
+    // Serve favicon directly
+    app.get('/favicon-32.png', async (c) => {
+      const faviconPath = join(webDistPath, 'favicon-32.png')
+      if (existsSync(faviconPath)) {
+        const data = readFileSync(faviconPath)
+        return new Response(data, {
+          headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' }
+        })
+      }
+      return c.notFound()
+    })
+
+    app.get('/favicon.png', async (c) => {
+      const faviconPath = join(webDistPath, 'favicon.png')
+      if (existsSync(faviconPath)) {
+        const data = readFileSync(faviconPath)
+        return new Response(data, {
+          headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' }
+        })
+      }
+      return c.notFound()
+    })
 
     // SPA fallback - serve injected HTML for all other routes
     app.get('*', serveIndex)
