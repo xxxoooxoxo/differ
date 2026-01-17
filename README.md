@@ -1,11 +1,29 @@
 # differ
 
-A local git diff viewer with syntax highlighting.
+The best diff viewer for working with AI.
+
+## What is this?
+
+A simple, local-only Git diff viewer. Think offline Graphite—quickly review small patches scattered across multiple locations in your local and remote repos.
+
+**What it is:**
+- A fast way to review diffs with syntax highlighting
+- Split and unified diff views
+- Branch comparison and commit history browser
+- Live reload when files change
+- Keyboard-driven navigation
+
+**What it is not:**
+- Not an orchestrator
+- No automated reviewing
+- No commenting
+- Not collaborative
+
+Just you and your code.
 
 ## Install
 
 ```bash
-# Clone and build
 git clone https://github.com/xxxoooxoxo/differ.git
 cd differ
 bun install
@@ -23,15 +41,6 @@ differ /path/to/repo      # specific repo
 differ -p 8080            # custom port
 differ --no-open          # don't open browser
 ```
-
-## Features
-
-- Split and unified diff views
-- Syntax highlighting via shiki
-- File tree and flat list navigation
-- Branch comparison
-- Commit history browser
-- Live reload on file changes
 
 ## Development
 

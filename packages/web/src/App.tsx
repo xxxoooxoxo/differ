@@ -9,6 +9,7 @@ import { PRView } from './pages/PRView'
 import { WelcomePage } from './pages/WelcomePage'
 import { TabProvider, useTabs } from './contexts/TabContext'
 import { TabBar } from './components/TabBar'
+import { CommandPaletteProvider, CommandPalette } from './components/CommandPalette'
 import { isTauri, selectDirectory, setRepoPath as setRepoPathApi } from './lib/api'
 
 function AppRoutes() {
@@ -106,12 +107,15 @@ export function App() {
   return (
     <BrowserRouter>
       <TabProvider initialRepoPath={repoPath || undefined}>
-        <div className="flex h-screen flex-col">
-          <TabBar />
-          <div className="flex-1 min-h-0">
-            <KeyedRoutes />
+        <CommandPaletteProvider>
+          <div className="flex h-screen flex-col">
+            <TabBar />
+            <div className="flex-1 min-h-0">
+              <KeyedRoutes />
+            </div>
           </div>
-        </div>
+          <CommandPalette />
+        </CommandPaletteProvider>
       </TabProvider>
     </BrowserRouter>
   )
