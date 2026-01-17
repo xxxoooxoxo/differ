@@ -386,6 +386,41 @@ export async function getFileContents(
   return fs.readFile(path.join(repoRoot.trim(), filePath), 'utf-8')
 }
 
+export async function getBinaryFileContents(
+  git: SimpleGit,
+  filePath: string,
+  ref?: string
+): Promise<Buffer | null> {
+  const fs = await import('fs/promises')
+  const path = await import('path')
+  const repoRoot = (await git.revparse(['--show-toplevel'])).trim()
+
+  if (ref) {
+    // Get from git object store - use raw output for binary
+    try {
+      const { exec } = await import('child_process')
+      const { promisify } = await import('util')
+      const execAsync = promisify(exec)
+
+      // Use git show with encoding buffer to get binary content
+      const { stdout } = await execAsync(
+        `git show "${ref}:${filePath}"`,
+        { cwd: repoRoot, encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 }
+      )
+      return stdout
+    } catch {
+      return null // File doesn't exist at this ref
+    }
+  }
+
+  // Get from working directory
+  try {
+    return await fs.readFile(path.join(repoRoot, filePath))
+  } catch {
+    return null // File doesn't exist
+  }
+}
+
 export async function getWorktrees(
   git: SimpleGit,
   mainBranch = 'main'

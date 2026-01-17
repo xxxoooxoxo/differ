@@ -4,16 +4,22 @@ import type { DiffStyle } from './Header'
 import { useEditor } from '../hooks/useEditor'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
-import { ExternalLink, Package, ChevronsUpDown, Code, Eye } from 'lucide-react'
+import { ExternalLink, Package, ChevronsUpDown, Code, Eye, Image } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { MarkdownPreview } from './MarkdownPreview'
+import { ImagePreview } from './ImagePreview'
 
 type ViewMode = 'diff' | 'preview'
 
 const MARKDOWN_EXTENSIONS = ['.md', '.mdx', '.markdown']
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp', '.tiff', '.tif']
 
 function isMarkdownFile(path: string): boolean {
   return MARKDOWN_EXTENSIONS.some(ext => path.toLowerCase().endsWith(ext))
+}
+
+function isImageFile(path: string): boolean {
+  return IMAGE_EXTENSIONS.some(ext => path.toLowerCase().endsWith(ext))
 }
 
 interface FileDiffInfo {
@@ -64,6 +70,7 @@ const DiffViewerInner = memo(function DiffViewerInner({
 
   // Markdown preview state
   const isMarkdown = isMarkdownFile(file.path)
+  const isImage = isImageFile(file.path)
   const [viewMode, setViewMode] = useState<ViewMode>('diff')
   const [markdownContent, setMarkdownContent] = useState<{ current: string; previous: string } | null>(null)
   const [loadingMarkdown, setLoadingMarkdown] = useState(false)
@@ -170,6 +177,12 @@ const DiffViewerInner = memo(function DiffViewerInner({
               Large
             </Badge>
           )}
+          {isImage && (
+            <Badge variant="outline" className="h-5 text-[10px] text-blue-400 border-blue-400/50">
+              <Image className="size-3 mr-1" />
+              Image
+            </Badge>
+          )}
           {isMarkdown && (
             <div className="flex items-center rounded border border-border overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <button
@@ -212,7 +225,10 @@ const DiffViewerInner = memo(function DiffViewerInner({
 
       {expanded && ready && (
         <div className="overflow-x-auto">
-          {isMarkdown && viewMode === 'preview' ? (
+          {isImage ? (
+            // Image preview
+            <ImagePreview path={file.path} status={file.status} />
+          ) : isMarkdown && viewMode === 'preview' ? (
             // Markdown preview mode
             loadingMarkdown ? (
               <div className="flex items-center justify-center py-8">

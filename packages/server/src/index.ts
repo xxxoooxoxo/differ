@@ -100,48 +100,70 @@ export function createServer(serverConfig: ServerConfig) {
   }
 }
 
+const DEFAULT_PORT = 1738
+const MAX_PORT_ATTEMPTS = 10
+
 export function startServer(config: ServerConfig & { port?: number }) {
-  const { port = 0 } = config
+  const { port = DEFAULT_PORT } = config
   const serverInstance = createServer(config)
   const { app, state } = serverInstance
 
-  const server = Bun.serve<{ state: GitState }>({
-    port,
-    fetch(request, server) {
-      // Handle WebSocket upgrade
-      const url = new URL(request.url)
-      if (url.pathname === '/ws') {
-        const success = server.upgrade(request, {
-          data: { state },
-        })
-        if (success) return undefined
-        return new Response('WebSocket upgrade failed', { status: 500 })
-      }
+  let currentPort = port
+  let server: ReturnType<typeof Bun.serve<{ state: GitState }>> | null = null
+  let attempts = 0
 
-      return app.fetch(request)
-    },
-    websocket: {
-      open(ws) {
-        // Use current fileWatcher from state
-        state.fileWatcher.clients.add(ws as unknown as WebSocket)
-        ws.send(JSON.stringify({ type: 'connected' }))
-      },
-      close(ws) {
-        state.fileWatcher.clients.delete(ws as unknown as WebSocket)
-      },
-      message(ws, message) {
-        const data = typeof message === 'string' ? message : message.toString()
-        try {
-          const parsed = JSON.parse(data)
-          if (parsed.type === 'ping') {
-            ws.send(JSON.stringify({ type: 'pong' }))
+  while (!server && attempts < MAX_PORT_ATTEMPTS) {
+    try {
+      server = Bun.serve<{ state: GitState }>({
+        port: currentPort,
+        fetch(request, server) {
+          // Handle WebSocket upgrade
+          const url = new URL(request.url)
+          if (url.pathname === '/ws') {
+            const success = server.upgrade(request, {
+              data: { state },
+            })
+            if (success) return undefined
+            return new Response('WebSocket upgrade failed', { status: 500 })
           }
-        } catch {
-          // Ignore invalid messages
-        }
-      },
-    },
-  })
+
+          return app.fetch(request)
+        },
+        websocket: {
+          open(ws) {
+            // Use current fileWatcher from state
+            state.fileWatcher.clients.add(ws as unknown as WebSocket)
+            ws.send(JSON.stringify({ type: 'connected' }))
+          },
+          close(ws) {
+            state.fileWatcher.clients.delete(ws as unknown as WebSocket)
+          },
+          message(ws, message) {
+            const data = typeof message === 'string' ? message : message.toString()
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong' }))
+              }
+            } catch {
+              // Ignore invalid messages
+            }
+          },
+        },
+      })
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'EADDRINUSE') {
+        attempts++
+        currentPort++
+      } else {
+        throw err
+      }
+    }
+  }
+
+  if (!server) {
+    throw new Error(`Failed to start server after ${MAX_PORT_ATTEMPTS} attempts. Ports ${port}-${currentPort - 1} are all in use.`)
+  }
 
   console.log(`Server running at http://localhost:${server.port}`)
 
