@@ -87,6 +87,10 @@ export function createServer(serverConfig: ServerConfig) {
     // Static assets (js, css, etc.)
     app.use('/assets/*', serveStatic({ root: webDistPath }))
 
+    // Serve favicon and other root-level static files
+    app.get('/favicon*.png', serveStatic({ root: webDistPath }))
+    app.get('/favicon.ico', serveStatic({ root: webDistPath }))
+
     // SPA fallback - serve injected HTML for all other routes
     app.get('*', serveIndex)
   }
