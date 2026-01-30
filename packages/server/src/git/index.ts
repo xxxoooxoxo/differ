@@ -297,21 +297,61 @@ export async function getCommitDiff(git: SimpleGit, sha: string): Promise<{ comm
   return { commit, files }
 }
 
+export interface CompareBranchesOptions {
+  useMergeBase?: boolean
+}
+
+export interface CompareBranchesResult extends DiffResult {
+  commitCount: number
+  mergeBase?: string
+  mergeBaseDate?: string
+}
+
+/**
+ * Get the merge-base (common ancestor) between two refs.
+ */
+export async function getMergeBase(git: SimpleGit, ref1: string, ref2: string): Promise<string> {
+  const result = await git.raw(['merge-base', ref1, ref2])
+  return result.trim()
+}
+
 export async function compareBranches(
   git: SimpleGit,
   base: string,
-  head: string
-): Promise<DiffResult & { commitCount: number }> {
+  head: string,
+  options: CompareBranchesOptions = {}
+): Promise<CompareBranchesResult> {
+  const { useMergeBase = false } = options
+
+  // Determine the effective base ref
+  let effectiveBase = base
+  let mergeBase: string | undefined
+  let mergeBaseDate: string | undefined
+
+  if (useMergeBase) {
+    try {
+      mergeBase = await getMergeBase(git, base, head)
+      effectiveBase = mergeBase
+
+      // Get the date of the merge-base commit
+      const dateResult = await git.raw(['log', '-1', '--format=%cI', mergeBase])
+      mergeBaseDate = dateResult.trim()
+    } catch {
+      // If merge-base fails (e.g., no common ancestor), fall back to regular diff
+      effectiveBase = base
+    }
+  }
+
   // Get commit count and diff summary in parallel
   const [countResult, diffSummary] = await Promise.all([
-    git.raw(['rev-list', '--count', `${base}..${head}`]),
-    git.diffSummary([base, head]),
+    git.raw(['rev-list', '--count', `${effectiveBase}..${head}`]),
+    git.diffSummary([effectiveBase, head]),
   ])
   const commitCount = parseInt(countResult.trim(), 10)
 
   // PARALLEL: Fetch all patches at once instead of sequentially
   const patchPromises = diffSummary.files.map(async (file) => {
-    const patch = await git.diff([base, head, '--', file.file]).catch(() => '')
+    const patch = await git.diff([effectiveBase, head, '--', file.file]).catch(() => '')
     return { file, patch }
   })
   const patchResults = await Promise.all(patchPromises)
@@ -346,6 +386,8 @@ export async function compareBranches(
       files: files.length,
     },
     commitCount,
+    mergeBase,
+    mergeBaseDate,
   }
 }
 

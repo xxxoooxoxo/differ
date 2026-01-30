@@ -28,8 +28,27 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from './ui/dropdown-menu'
-import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
-import { GitBranch, Folder, ChevronDown, ExternalLink, GitPullRequest, Eye, CloudDownload, Loader2, GitFork, MoreHorizontal, Download } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from './ui/tooltip'
+import {
+  GitBranch,
+  Folder,
+  ChevronDown,
+  ExternalLink,
+  GitPullRequest,
+  Eye,
+  CloudDownload,
+  Loader2,
+  GitFork,
+  MoreHorizontal,
+  Download,
+  Columns2,
+  AlignJustify,
+} from 'lucide-react'
 
 export type DiffStyle = 'split' | 'unified'
 
@@ -524,12 +543,27 @@ export function HeaderControls({
   return (
     <div className="flex items-center gap-2">
       {onDiffStyleChange && (
-        <Tabs value={diffStyle} onValueChange={(v) => onDiffStyleChange(v as DiffStyle)}>
-          <TabsList className="h-7 p-0.5">
-            <TabsTrigger value="split" className="h-6 px-2.5 text-xs">Split</TabsTrigger>
-            <TabsTrigger value="unified" className="h-6 px-2.5 text-xs">Unified</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => onDiffStyleChange(diffStyle === 'split' ? 'unified' : 'split')}
+              >
+                {diffStyle === 'split' ? (
+                  <Columns2 className="size-3.5" />
+                ) : (
+                  <AlignJustify className="size-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-xs">{diffStyle === 'split' ? 'Split view' : 'Unified view'}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
 
       <Select value={editor} onValueChange={(v) => setEditor(v as EditorType)}>

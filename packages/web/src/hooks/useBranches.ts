@@ -35,7 +35,17 @@ export function useBranches(repoPath?: string) {
   return { data, loading, error, refetch: fetchBranches }
 }
 
-export function useCompareBranches(base: string | null, head: string | null, repoPath?: string) {
+export interface UseCompareBranchesOptions {
+  useMergeBase?: boolean
+}
+
+export function useCompareBranches(
+  base: string | null,
+  head: string | null,
+  repoPath?: string,
+  options?: UseCompareBranchesOptions
+) {
+  const { useMergeBase = true } = options ?? {}
   const [data, setData] = useState<CompareBranchesResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,14 +60,14 @@ export function useCompareBranches(base: string | null, head: string | null, rep
       setLoading(true)
       setError(null)
 
-      const result = await compareBranches(base, head, repoPath)
+      const result = await compareBranches(base, head, repoPath, { useMergeBase })
       setData(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
-  }, [base, head, repoPath])
+  }, [base, head, repoPath, useMergeBase])
 
   useEffect(() => {
     fetchComparison()

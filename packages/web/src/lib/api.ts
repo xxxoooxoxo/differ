@@ -34,6 +34,8 @@ export interface DiffResult {
 
 export interface CompareBranchesResult extends DiffResult {
   commitCount: number
+  mergeBase?: string
+  mergeBaseDate?: string
 }
 
 export interface CommitStats {
@@ -193,12 +195,27 @@ export async function getBranches(repoPath?: string): Promise<BranchList> {
   }
 }
 
-export async function compareBranches(base: string, head: string, repoPath?: string): Promise<CompareBranchesResult> {
+export interface CompareBranchesOptions {
+  useMergeBase?: boolean
+}
+
+export async function compareBranches(
+  base: string,
+  head: string,
+  repoPath?: string,
+  options?: CompareBranchesOptions
+): Promise<CompareBranchesResult> {
+  const { useMergeBase = true } = options ?? {}
+
   if (isTauri()) {
     const invoke = await getTauriInvoke()
     return invoke('cmd_compare_branch', { base, head, repoPath }) as Promise<CompareBranchesResult>
   } else {
-    const res = await fetch(buildUrl('/api/branches/compare', { base, head }, repoPath))
+    const params: Record<string, string | number> = { base, head }
+    if (!useMergeBase) {
+      params.useMergeBase = 'false'
+    }
+    const res = await fetch(buildUrl('/api/branches/compare', params, repoPath))
     if (!res.ok) throw new Error('Failed to compare branches')
     return res.json()
   }
