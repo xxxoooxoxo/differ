@@ -23,6 +23,7 @@ export interface TabViewState {
   diffStyle: DiffStyle
   scrollPosition?: number
   expandedFolders?: string[]
+  useMergeBase?: boolean // For branch comparison: use merge-base for cleaner diffs
 }
 
 // Full tab definition

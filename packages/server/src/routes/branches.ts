@@ -20,19 +20,24 @@ export function createBranchRoutes(getGit: () => SimpleGit) {
     }
   })
 
-  // GET /api/branches/compare?base=...&head=... - Compare two branches
+  // GET /api/branches/compare?base=...&head=...&useMergeBase=true - Compare two branches
   // Supports optional ?repoPath= query param for multi-tab support
+  // When useMergeBase=true (default), shows only changes introduced by head branch
+  // When useMergeBase=false, shows all differences between base and head
   app.get('/compare', async (c) => {
     try {
       const base = c.req.query('base')
       const head = c.req.query('head')
+      const useMergeBaseParam = c.req.query('useMergeBase')
+      // Default to true for better UX - show only branch changes by default
+      const useMergeBase = useMergeBaseParam !== 'false'
 
       if (!base || !head) {
         return c.json({ error: 'base and head query parameters are required' }, 400)
       }
 
       const git = getGitForRequest(c, getGit)
-      const result = await compareBranches(git, base, head)
+      const result = await compareBranches(git, base, head, { useMergeBase })
       return c.json(result)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to compare branches'
