@@ -46,6 +46,7 @@ export interface BranchInfo {
   name: string
   current: boolean
   commit: string
+  lastActivity?: string // ISO date of last commit
 }
 
 export interface WorktreeInfo {

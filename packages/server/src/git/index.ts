@@ -393,18 +393,54 @@ export async function compareBranches(
 
 export async function getBranches(git: SimpleGit): Promise<{ branches: BranchInfo[]; current: string }> {
   const branchSummary = await git.branch(['-a'])
-  const branches: BranchInfo[] = []
+  const branchEntries: Array<{ name: string; current: boolean; commit: string }> = []
 
   for (const [name, branch] of Object.entries(branchSummary.branches)) {
     // Skip remote tracking branches for cleaner UI
     if (name.startsWith('remotes/')) continue
 
-    branches.push({
+    branchEntries.push({
       name,
       current: branch.current,
       commit: branch.commit,
     })
   }
+
+  // PARALLEL: Fetch last activity date for all branches
+  const branchPromises = branchEntries.map(async (entry) => {
+    let lastActivity: string | undefined
+    try {
+      const dateOutput = await git.raw(['log', '-1', '--format=%cI', entry.name])
+      lastActivity = dateOutput.trim() || undefined
+    } catch {
+      // Branch might not have commits or be invalid
+    }
+
+    return {
+      ...entry,
+      lastActivity,
+    }
+  })
+
+  const branches = await Promise.all(branchPromises)
+
+  // Sort by last activity (most recent first), with current branch at the top
+  branches.sort((a, b) => {
+    // Current branch always first
+    if (a.current) return -1
+    if (b.current) return 1
+
+    // Then sort by last activity (most recent first)
+    if (a.lastActivity && b.lastActivity) {
+      return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+    }
+    // Branches with activity come before those without
+    if (a.lastActivity && !b.lastActivity) return -1
+    if (!a.lastActivity && b.lastActivity) return 1
+
+    // Fallback to alphabetical
+    return a.name.localeCompare(b.name)
+  })
 
   return {
     branches,
