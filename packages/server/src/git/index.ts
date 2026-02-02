@@ -975,16 +975,27 @@ export async function getPRDiff(
   // Ensure we're comparing against remote base (in case local is behind)
   const remoteBase = `${remote}/${baseRef}`
 
-  // Get diff between base and FETCH_HEAD
+  // Use merge-base to show only changes introduced by the PR (like GitHub does)
+  // This finds the common ancestor between base and head, then diffs from there
+  let effectiveBase = remoteBase
+  try {
+    const mergeBase = await getMergeBase(git, remoteBase, 'FETCH_HEAD')
+    effectiveBase = mergeBase
+  } catch {
+    // If merge-base fails (e.g., no common ancestor), fall back to regular diff
+    effectiveBase = remoteBase
+  }
+
+  // Get diff between merge-base and FETCH_HEAD
   const [countResult, diffSummary] = await Promise.all([
-    git.raw(['rev-list', '--count', `${remoteBase}..FETCH_HEAD`]).catch(() => '0'),
-    git.diffSummary([remoteBase, 'FETCH_HEAD']),
+    git.raw(['rev-list', '--count', `${effectiveBase}..FETCH_HEAD`]).catch(() => '0'),
+    git.diffSummary([effectiveBase, 'FETCH_HEAD']),
   ])
   const commitCount = parseInt(countResult.trim(), 10)
 
   // Fetch all patches in parallel
   const patchPromises = diffSummary.files.map(async (file) => {
-    const rawPatch = await git.diff([remoteBase, 'FETCH_HEAD', '--', file.file]).catch(() => '')
+    const rawPatch = await git.diff([effectiveBase, 'FETCH_HEAD', '--', file.file]).catch(() => '')
     return { file, rawPatch }
   })
   const patchResults = await Promise.all(patchPromises)
