@@ -599,11 +599,6 @@ export function HeaderContent({ isConnected, stats, diffStyle, onDiffStyleChange
   return (
     <>
       <div className="flex items-center gap-3">
-        <h1 className="flex items-center gap-2 text-sm font-medium tracking-tight">
-          <GitBranch className="size-4 text-muted-foreground" />
-          <span>differ</span>
-        </h1>
-        <span className="h-4 w-px bg-border" />
         <HeaderNav />
       </div>
 

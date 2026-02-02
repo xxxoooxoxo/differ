@@ -4,7 +4,7 @@
 
 # differ
 
-The best diff viewer for working with AI.
+The diff IDE for reviewing AI code, fast.
 
 ## What is this?
 

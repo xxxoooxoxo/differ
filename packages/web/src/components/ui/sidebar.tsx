@@ -271,7 +271,13 @@ function SidebarTrigger({
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      <svg width="18" height="18" viewBox="0 0 128 128" fill="none">
+        <rect x="8" y="8" width="112" height="112" rx="24" stroke="currentColor" strokeWidth="6" fill="none"/>
+        <line x1="38" y1="48" x2="38" y2="64" stroke="currentColor" strokeWidth="6" strokeLinecap="round"/>
+        <line x1="30" y1="56" x2="46" y2="56" stroke="currentColor" strokeWidth="6" strokeLinecap="round"/>
+        <line x1="82" y1="56" x2="98" y2="56" stroke="currentColor" strokeWidth="6" strokeLinecap="round"/>
+        <path d="M40 80 Q64 100 88 80" stroke="currentColor" strokeWidth="6" strokeLinecap="round" fill="none"/>
+      </svg>
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   )

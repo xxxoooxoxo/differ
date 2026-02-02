@@ -110,6 +110,17 @@ export function createServer(serverConfig: ServerConfig) {
       return c.notFound()
     })
 
+    app.get('/logo.png', async (c) => {
+      const logoPath = join(webDistPath, 'logo.png')
+      if (existsSync(logoPath)) {
+        const data = readFileSync(logoPath)
+        return new Response(data, {
+          headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' }
+        })
+      }
+      return c.notFound()
+    })
+
     // SPA fallback - serve injected HTML for all other routes
     app.get('*', serveIndex)
   }
