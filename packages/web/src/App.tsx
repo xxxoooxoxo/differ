@@ -7,7 +7,7 @@ import { CompareView } from './pages/CompareView'
 import { PRListPage } from './pages/PRListPage'
 import { PRView } from './pages/PRView'
 import { WelcomePage } from './pages/WelcomePage'
-import { TabProvider, useTabs } from './contexts/TabContext'
+import { TabProvider } from './contexts/TabContext'
 import { TabBar } from './components/TabBar'
 import { CommandPaletteProvider, CommandPalette } from './components/CommandPalette'
 import { isTauri, selectDirectory, setRepoPath as setRepoPathApi } from './lib/api'
@@ -25,11 +25,10 @@ function AppRoutes() {
   )
 }
 
-// Wrapper that uses activeTabId as key to force re-mount on tab switch
+// Wrapper for routes - pages handle tab switching via useEffect
 function KeyedRoutes() {
-  const { activeTabId } = useTabs()
   return (
-    <div key={activeTabId} className="h-full">
+    <div className="h-full">
       <AppRoutes />
     </div>
   )
@@ -42,7 +41,7 @@ export function App() {
   useEffect(() => {
     // In Tauri mode, check if we have a last opened repo
     if (isTauri()) {
-      const lastRepo = localStorage.getItem('differ:lastRepo')
+      const lastRepo = localStorage.getItem('diffy:lastRepo')
       if (lastRepo) {
         // Try to open the last used repo
         setRepoPathApi(lastRepo)
@@ -52,7 +51,7 @@ export function App() {
           })
           .catch(() => {
             // Repo no longer exists or is invalid
-            localStorage.removeItem('differ:lastRepo')
+            localStorage.removeItem('diffy:lastRepo')
             setInitialized(true)
           })
       } else {
@@ -64,7 +63,7 @@ export function App() {
   const handleRepoSelected = useCallback((path: string) => {
     setRepoPath(path)
     // Remember the repo for next launch
-    localStorage.setItem('differ:lastRepo', path)
+    localStorage.setItem('diffy:lastRepo', path)
   }, [])
 
   // Keyboard shortcut to change directory (Cmd/Ctrl+O) in Tauri mode

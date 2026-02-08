@@ -8,6 +8,7 @@ import { HeaderContent, type DiffStyle } from '../components/Header'
 import { BranchSelector } from '../components/BranchSelector'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
+import { FileMinimap } from '../components/FileMinimap'
 import { Separator } from '../components/ui/separator'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Label } from '../components/ui/label'
@@ -62,7 +63,7 @@ export function CompareView() {
         setUseMergeBase(activeTab.viewState.useMergeBase ?? true)
       }
 
-      requestAnimationFrame(() => {
+      queueMicrotask(() => {
         isTabSwitchingRef.current = false
       })
     }
@@ -108,7 +109,7 @@ export function CompareView() {
   const branches = branchData?.branches || []
   const files = compareData?.files || []
 
-  const { focusedIndex } = useVimNavigation({
+  const { focusedIndex, isActive: isVimActive } = useVimNavigation({
     files,
     diffListRef,
     scrollContainerRef: contentRef,
@@ -235,12 +236,20 @@ export function CompareView() {
                   diffStyle={diffStyle}
                   scrollContainerRef={contentRef}
                   focusedIndex={focusedIndex}
+                  isVimActive={isVimActive}
                 />
               </>
             )}
           </div>
         </main>
       </SidebarInset>
+      {!compareLoading && files.length > 0 && baseBranch !== headBranch && (
+        <FileMinimap
+          files={files}
+          onSelectFile={handleSelectFile}
+          selectedFile={selectedFile}
+        />
+      )}
     </SidebarProvider>
   )
 }

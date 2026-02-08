@@ -16,14 +16,14 @@ export type { DifferConfig }
 // Injected by server into HTML - available synchronously (web mode only)
 declare global {
   interface Window {
-    __DIFFER__?: {
+    __DIFFY__?: {
       config: DifferConfig
       repoPath: string
     }
   }
 }
 
-// Default config for dev mode (when not served by differ server)
+// Default config for dev mode (when not served by diffy server)
 const DEFAULT_CONFIG: DifferConfig = {
   editor: 'vscode',
   diffStyle: 'split',
@@ -40,7 +40,7 @@ function getInitialState() {
       repoPath: null as string | null,
     }
   }
-  const injected = window.__DIFFER__
+  const injected = window.__DIFFY__
   return {
     config: injected?.config ?? DEFAULT_CONFIG,
     repoPath: injected?.repoPath ?? null,

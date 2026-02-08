@@ -1,12 +1,12 @@
 {
-  "name": "@differ/cli",
+  "name": "@diffy/cli",
   "version": "0.2.0",
   "type": "module",
   "bin": {
-    "differ": "./src/index.ts"
+    "diffy": "./src/index.ts"
   },
   "dependencies": {
-    "@differ/server": "workspace:*",
+    "@diffy/server": "workspace:*",
     "open": "^10.1.0"
   }
 }

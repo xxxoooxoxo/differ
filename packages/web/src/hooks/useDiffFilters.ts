@@ -12,7 +12,7 @@ export interface DiffFilters {
   filterStatuses: FileStatus[]
 }
 
-const STORAGE_KEY = 'differ-filters'
+const STORAGE_KEY = 'diffy-filters'
 
 const defaultFilters: DiffFilters = {
   sortBy: 'modified',

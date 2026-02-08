@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 bun install              # Install all workspace dependencies
 bun run typecheck        # Type-check all packages (use this to verify changes)
 bun run dev              # Start Vite dev server (frontend only, port 5173)
-bun run differ           # Run CLI from source (starts backend server)
+bun run diffy           # Run CLI from source (starts backend server)
 bun run build:cli        # Create standalone binary
 ```
 
@@ -23,7 +23,7 @@ bun run tauri:build      # Build Tauri app for production
 
 ## Architecture
 
-Differ is a monorepo git diff viewer with three packages plus optional Tauri desktop app:
+Diffy is a monorepo git diff viewer with three packages plus optional Tauri desktop app:
 
 ```
 packages/
@@ -58,7 +58,7 @@ Web (same React app, uses lib/api.ts abstraction)
 
 ## Package Details
 
-### @differ/server
+### @diffy/server
 
 **Routes** (in `src/routes/`):
 - `/api/diff` - Working directory changes and file diffs
@@ -74,7 +74,7 @@ Web (same React app, uses lib/api.ts abstraction)
 - `compareBranches()` - Diff between branches
 - Files >50KB patch size are lazy-loaded to prevent browser lockup
 
-### @differ/web
+### @diffy/web
 
 **API Abstraction** (`src/lib/api.ts`):
 - Unified API layer that works in both web (HTTP fetch) and Tauri (invoke) modes
@@ -89,13 +89,13 @@ Web (same React app, uses lib/api.ts abstraction)
 
 **Vite Config**: Dev proxy sends `/api/*` and `/ws` → localhost:1738
 
-### @differ/cli
+### @diffy/cli
 
 Entry point at `src/index.ts`. Parses CLI args, starts server on port 1738, opens browser.
 
 ## Configuration System
 
-Hierarchy: CLI args > `.differrc.json` (repo) > `~/.config/differ/config.json` (global) > defaults
+Hierarchy: CLI args > `.diffyrc.json` (repo) > `~/.config/diffy/config.json` (global) > defaults
 
 Options: `editor`, `diffStyle` (split/unified), `port`, `autoOpen`, `largeFileThreshold`
 
@@ -107,7 +107,7 @@ For full development (frontend + backend):
 bun run dev
 
 # Terminal 2: Backend server
-bun run differ ./
+bun run diffy ./
 ```
 
 Frontend at localhost:5173 proxies API calls to backend at localhost:1738.

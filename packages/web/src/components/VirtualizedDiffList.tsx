@@ -21,6 +21,7 @@ interface VirtualizedDiffListProps {
   diffStyle: DiffStyle
   scrollContainerRef: React.RefObject<HTMLElement | null>
   focusedIndex?: number | null
+  isVimActive?: boolean
 }
 
 export interface VirtualizedDiffListHandle {
@@ -34,10 +35,10 @@ export interface VirtualizedDiffListHandle {
 }
 
 function estimateItemHeight(file: FileDiffInfo, expanded: boolean): number {
-  if (!expanded) return 52 // Collapsed: header only
-  if (file.isLarge) return 192 // Header + placeholder
-  const lines = Math.max(file.additions + file.deletions, 10)
-  return 52 + Math.min(lines * 22, 800) // Header + content (capped)
+  if (!expanded) return 44 // Collapsed: header only (measured)
+  if (file.isLarge) return 200 // Header + placeholder
+  const lines = Math.max(file.additions + file.deletions, 5)
+  return 44 + Math.min(lines * 20, 600) // Header + content (capped)
 }
 
 interface DiffItemWrapperProps {
@@ -48,8 +49,6 @@ interface DiffItemWrapperProps {
   virtualItem: { index: number; start: number }
   measureElement: (node: HTMLElement | null) => void
   onToggleExpanded: (path: string, expanded: boolean) => void
-  onViewportEntry: (path: string) => void
-  scrollContainerRef: React.RefObject<HTMLElement | null>
 }
 
 const DiffItemWrapper = memo(function DiffItemWrapper({
@@ -60,48 +59,10 @@ const DiffItemWrapper = memo(function DiffItemWrapper({
   virtualItem,
   measureElement,
   onToggleExpanded,
-  onViewportEntry,
-  scrollContainerRef,
 }: DiffItemWrapperProps) {
-  const itemRef = useRef<HTMLDivElement>(null)
-  const hasEnteredViewport = useRef(false)
-
-  useEffect(() => {
-    const element = itemRef.current
-    const scrollContainer = scrollContainerRef.current
-    if (!element || hasEnteredViewport.current) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        if (entry.isIntersecting && !hasEnteredViewport.current) {
-          hasEnteredViewport.current = true
-          onViewportEntry(file.path)
-          observer.disconnect()
-        }
-      },
-      {
-        root: scrollContainer,
-        rootMargin: '100px 0px', // Pre-expand items slightly before they're visible
-        threshold: 0,
-      }
-    )
-
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [file.path, onViewportEntry, scrollContainerRef])
-
-  const handleRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      (itemRef as React.MutableRefObject<HTMLDivElement | null>).current = node
-      measureElement(node)
-    },
-    [measureElement]
-  )
-
   return (
     <div
-      ref={handleRef}
+      ref={measureElement}
       data-index={virtualItem.index}
       style={{
         position: 'absolute',
@@ -109,6 +70,7 @@ const DiffItemWrapper = memo(function DiffItemWrapper({
         left: 0,
         width: '100%',
         transform: `translateY(${virtualItem.start}px)`,
+        willChange: 'transform',
       }}
     >
       <DiffViewer
@@ -133,15 +95,14 @@ const DiffItemWrapper = memo(function DiffItemWrapper({
 })
 
 export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, VirtualizedDiffListProps>(
-  function VirtualizedDiffList({ files, diffStyle, scrollContainerRef, focusedIndex }, ref) {
+  function VirtualizedDiffList({ files, diffStyle, scrollContainerRef, focusedIndex, isVimActive }, ref) {
     const pathToIndex = useRef<Map<string, number>>(new Map())
-    // Track which files are expanded (default: collapsed)
+    // Track which files are expanded (default: all expanded)
     const [expandedState, setExpandedState] = useState<Map<string, boolean>>(() => new Map())
-    // Track which files have entered viewport at least once (for auto-expansion)
-    const viewportEnteredRef = useRef<Set<string>>(new Set())
-    // Track files that user has explicitly toggled (to prevent auto-expand override)
+    // Track files that user has explicitly toggled
     const userToggledRef = useRef<Set<string>>(new Set())
-    // Ref to the container for IntersectionObserver
+    // Track previous file paths to detect actual file list changes
+    const prevFilePathsRef = useRef<string[]>([])
     const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -149,55 +110,46 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
       files.forEach((file, index) => {
         pathToIndex.current.set(file.path, index)
       })
-      // Reset viewport tracking when files change
-      viewportEnteredRef.current.clear()
-      userToggledRef.current.clear()
+      // Only reset user toggle tracking when file paths actually change
+      const currentPaths = files.map(f => f.path)
+      const prevPaths = prevFilePathsRef.current
+      const pathsChanged = currentPaths.length !== prevPaths.length ||
+        currentPaths.some((p, i) => p !== prevPaths[i])
+      if (pathsChanged) {
+        userToggledRef.current.clear()
+        prevFilePathsRef.current = currentPaths
+        // Start all files expanded when file list changes
+        setExpandedState(new Map(files.map(f => [f.path, true])))
+      }
     }, [files])
 
-    // Get expansion state for a file (collapsed by default until viewport entry)
+    // Get expansion state for a file (expanded by default)
     const getIsExpanded = useCallback((path: string) => {
-      return expandedState.get(path) ?? false
+      return expandedState.get(path) ?? true
     }, [expandedState])
 
     const virtualizer = useVirtualizer({
       count: files.length,
       getScrollElement: () => scrollContainerRef.current,
       estimateSize: (index) => estimateItemHeight(files[index], getIsExpanded(files[index].path)),
-      overscan: 3,
+      overscan: 8,
       gap: 16,
     })
 
     const expandAll = useCallback(() => {
-      // Mark all as user-toggled to prevent auto-expand interference
       files.forEach(f => userToggledRef.current.add(f.path))
       setExpandedState(new Map(files.map(f => [f.path, true])))
     }, [files])
 
     const collapseAll = useCallback(() => {
-      // Mark all as user-toggled to prevent auto-expand interference
       files.forEach(f => userToggledRef.current.add(f.path))
       setExpandedState(new Map(files.map(f => [f.path, false])))
     }, [files])
 
     const isAllExpanded = useCallback(() => {
       if (files.length === 0) return false
-      return files.every(f => expandedState.get(f.path) ?? false)
+      return files.every(f => expandedState.get(f.path) ?? true)
     }, [files, expandedState])
-
-    // Auto-expand files when they enter viewport for the first time
-    const handleViewportEntry = useCallback((path: string) => {
-      if (viewportEnteredRef.current.has(path)) return
-      if (userToggledRef.current.has(path)) return
-
-      viewportEnteredRef.current.add(path)
-      setExpandedState(prev => {
-        // Only auto-expand if not already set
-        if (prev.has(path)) return prev
-        const next = new Map(prev)
-        next.set(path, true)
-        return next
-      })
-    }, [])
 
     const handleToggleExpanded = useCallback((path: string, expanded: boolean) => {
       // Mark as user-toggled to prevent auto-expand from overriding
@@ -263,7 +215,12 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
 
     return (
       <>
-        <div className="flex justify-end mb-2">
+        <div className="flex justify-end mb-2 items-center gap-2">
+          {isVimActive && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
+              VIM
+            </span>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -284,7 +241,7 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
         >
           {virtualItems.map((virtualItem) => {
             const file = files[virtualItem.index]
-            const isExpanded = expandedState.get(file.path) ?? false
+            const isExpanded = expandedState.get(file.path) ?? true
             return (
               <DiffItemWrapper
                 key={file.path}
@@ -295,8 +252,6 @@ export const VirtualizedDiffList = memo(forwardRef<VirtualizedDiffListHandle, Vi
                 virtualItem={virtualItem}
                 measureElement={measureElement}
                 onToggleExpanded={handleToggleExpanded}
-                onViewportEntry={handleViewportEntry}
-                scrollContainerRef={scrollContainerRef}
               />
             )
           })}

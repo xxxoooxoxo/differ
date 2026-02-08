@@ -1,4 +1,4 @@
-import { useState, useEffect, memo, startTransition, useCallback, useRef } from 'react'
+import { useState, useEffect, memo, useCallback, useRef } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
 import type { DiffStyle } from './Header'
 import { useEditor } from '../hooks/useEditor'
@@ -63,7 +63,6 @@ const DiffViewerInner = memo(function DiffViewerInner({
       setInternalExpanded(newExpanded)
     }
   }
-  const [ready, setReady] = useState(false)
   const [loadedPatch, setLoadedPatch] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const { openInEditor } = useEditor()
@@ -74,10 +73,6 @@ const DiffViewerInner = memo(function DiffViewerInner({
   const [viewMode, setViewMode] = useState<ViewMode>('diff')
   const [markdownContent, setMarkdownContent] = useState<{ current: string; previous: string } | null>(null)
   const [loadingMarkdown, setLoadingMarkdown] = useState(false)
-
-  useEffect(() => {
-    startTransition(() => setReady(true))
-  }, [])
 
   // Load markdown content when switching to preview mode
   const loadMarkdownContent = async () => {
@@ -157,6 +152,7 @@ const DiffViewerInner = memo(function DiffViewerInner({
           ? "border-blue-500 ring-1 ring-blue-500/50"
           : "border-border"
       )}
+      style={{ contain: 'layout style' }}
       id={`diff-${file.path}`}
     >
       <div
@@ -223,7 +219,7 @@ const DiffViewerInner = memo(function DiffViewerInner({
         </div>
       </div>
 
-      {expanded && ready && (
+      {expanded && (
         <div className="overflow-x-auto">
           {isImage ? (
             // Image preview
@@ -292,6 +288,7 @@ const DiffViewerInner = memo(function DiffViewerInner({
               options={{
                 theme: 'github-dark',
                 diffStyle: diffStyle,
+                hunkSeparators: 'line-info',
               }}
               style={{
                 fontSize: '13px',
@@ -312,6 +309,8 @@ const DiffViewerInner = memo(function DiffViewerInner({
     prevProps.file.additions === nextProps.file.additions &&
     prevProps.file.deletions === nextProps.file.deletions &&
     prevProps.file.isLarge === nextProps.file.isLarge &&
+    prevProps.file.oldContent === nextProps.file.oldContent &&
+    prevProps.file.newContent === nextProps.file.newContent &&
     prevProps.diffStyle === nextProps.diffStyle &&
     prevProps.expanded === nextProps.expanded &&
     prevProps.isFocused === nextProps.isFocused

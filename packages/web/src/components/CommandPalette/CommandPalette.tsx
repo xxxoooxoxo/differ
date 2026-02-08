@@ -177,7 +177,7 @@ export function CommandPalette() {
     const newStyle = currentStyle === 'split' ? 'unified' : 'split'
 
     // Dispatch custom event that pages can listen to
-    window.dispatchEvent(new CustomEvent('differ:toggle-diff-style', { detail: newStyle }))
+    window.dispatchEvent(new CustomEvent('diffy:toggle-diff-style', { detail: newStyle }))
     close()
   }, [activeTab, close])
 

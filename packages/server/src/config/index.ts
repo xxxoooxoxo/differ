@@ -5,8 +5,8 @@ import { DEFAULT_CONFIG, type DifferConfig } from './types'
 
 export * from './types'
 
-const CONFIG_FILENAME = '.differrc.json'
-const GLOBAL_CONFIG_DIR = join(homedir(), '.config', 'differ')
+const CONFIG_FILENAME = '.diffyrc.json'
+const GLOBAL_CONFIG_DIR = join(homedir(), '.config', 'diffy')
 const GLOBAL_CONFIG_PATH = join(GLOBAL_CONFIG_DIR, 'config.json')
 
 /**
@@ -27,8 +27,8 @@ function loadConfigFile(path: string): Partial<DifferConfig> {
 /**
  * Load config with priority:
  * 1. CLI options (passed in)
- * 2. Repo-local config (.differrc.json in repoPath)
- * 3. Global config (~/.config/differ/config.json)
+ * 2. Repo-local config (.diffyrc.json in repoPath)
+ * 3. Global config (~/.config/diffy/config.json)
  * 4. Defaults
  */
 export function loadConfig(

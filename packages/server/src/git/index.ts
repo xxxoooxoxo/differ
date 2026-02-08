@@ -707,7 +707,7 @@ export async function openPRWorktree(git: SimpleGit, prNumber: number, remote = 
   const repoName = path.basename(repoRoot)
 
   // Create worktree in temp directory
-  const worktreePath = path.join(os.tmpdir(), `differ-${repoName}-pr-${prNumber}`)
+  const worktreePath = path.join(os.tmpdir(), `diffy-${repoName}-pr-${prNumber}`)
 
   // Check if worktree already exists
   try {
@@ -769,7 +769,7 @@ export async function closePRWorktree(git: SimpleGit, prNumber: number): Promise
   const repoRoot = (await git.revparse(['--show-toplevel'])).trim()
   const repoName = path.basename(repoRoot)
 
-  const worktreePath = path.join(os.tmpdir(), `differ-${repoName}-pr-${prNumber}`)
+  const worktreePath = path.join(os.tmpdir(), `diffy-${repoName}-pr-${prNumber}`)
 
   try {
     // Remove the worktree

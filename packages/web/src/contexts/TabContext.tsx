@@ -72,7 +72,7 @@ interface TabContextValue {
 
 const TabContext = createContext<TabContextValue | null>(null)
 
-const STORAGE_KEY = 'differ:tabs'
+const STORAGE_KEY = 'diffy:tabs'
 const DEFAULT_DIFF_STYLE: DiffStyle = 'split'
 
 function generateId(): string {
@@ -130,7 +130,7 @@ function getDefaultRoute(type: TabType): string {
 // Get the default repo path from server-injected config or Tauri
 function getServerRepoPath(): string {
   // Check for server-injected config
-  const differConfig = (window as unknown as { __DIFFER__?: { repoPath?: string } }).__DIFFER__
+  const differConfig = (window as unknown as { __DIFFY__?: { repoPath?: string } }).__DIFFY__
   if (differConfig?.repoPath) {
     return differConfig.repoPath
   }

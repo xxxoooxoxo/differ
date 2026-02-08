@@ -9,6 +9,7 @@ import { HeaderContent, type DiffStyle } from '../components/Header'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
 import { DiffToolbar } from '../components/DiffToolbar'
+import { FileMinimap } from '../components/FileMinimap'
 import { Separator } from '../components/ui/separator'
 
 export function CurrentChanges() {
@@ -45,7 +46,7 @@ export function CurrentChanges() {
       }
 
       // Clear the flag after state updates have been applied
-      requestAnimationFrame(() => {
+      queueMicrotask(() => {
         isTabSwitchingRef.current = false
       })
     }
@@ -94,7 +95,7 @@ export function CurrentChanges() {
 
   const files = filteredFiles
 
-  const { focusedIndex } = useVimNavigation({
+  const { focusedIndex, isActive: isVimActive } = useVimNavigation({
     files,
     diffListRef,
     scrollContainerRef: contentRef,
@@ -165,6 +166,7 @@ export function CurrentChanges() {
                 diffStyle={diffStyle}
                 scrollContainerRef={contentRef}
                 focusedIndex={focusedIndex}
+                isVimActive={isVimActive}
               />
             )}
           </div>
@@ -184,6 +186,13 @@ export function CurrentChanges() {
           />
         )}
       </SidebarInset>
+      {!loading && files.length > 0 && (
+        <FileMinimap
+          files={files}
+          onSelectFile={handleSelectFile}
+          selectedFile={selectedFile}
+        />
+      )}
     </SidebarProvider>
   )
 }

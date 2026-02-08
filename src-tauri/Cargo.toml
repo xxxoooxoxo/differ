@@ -1,18 +1,18 @@
 [package]
-name = "differ"
+name = "diffy"
 version = "0.1.0"
 description = "A git diff viewer desktop application"
-authors = ["differ"]
+authors = ["diffy"]
 license = "MIT"
 repository = ""
 edition = "2021"
 
 [lib]
-name = "differ_lib"
+name = "diffy_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
-name = "differ"
+name = "diffy"
 path = "src/main.rs"
 
 [build-dependencies]

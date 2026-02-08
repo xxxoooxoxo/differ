@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="logo.png" width="128" height="128" alt="Differ Logo">
+  <img src="logo.png" width="128" height="128" alt="Diffy Logo">
 </p>
 
-# differ
+# diffy
 
 The diff IDE for reviewing AI code, fast.
 
@@ -28,22 +28,22 @@ Just you and your code.
 ## Install
 
 ```bash
-git clone https://github.com/xxxoooxoxo/differ.git
-cd differ
+git clone https://github.com/xxxoooxoxo/diffy.git
+cd diffy
 bun install
 bun run build:cli
 
 # Link globally (optional)
-sudo ln -sf $(pwd)/dist/differ /usr/local/bin/differ
+sudo ln -sf $(pwd)/dist/diffy /usr/local/bin/diffy
 ```
 
 ## Usage
 
 ```bash
-differ                    # current directory
-differ /path/to/repo      # specific repo
-differ -p 8080            # custom port
-differ --no-open          # don't open browser
+diffy                    # current directory
+diffy /path/to/repo      # specific repo
+diffy -p 8080            # custom port
+diffy --no-open          # don't open browser
 ```
 
 ## Development
@@ -55,7 +55,7 @@ bun install
 bun run dev
 
 # Terminal 2: backend
-bun run differ ./
+bun run diffy ./
 ```
 
 Frontend runs on `localhost:5173`, proxies API calls to backend on `localhost:1738`.

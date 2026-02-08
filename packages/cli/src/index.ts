@@ -4,7 +4,7 @@ import { parseArgs } from 'util'
 import { resolve, join } from 'path'
 import { existsSync } from 'fs'
 import open from 'open'
-import { startServer, loadConfig, type EditorType, type DiffStyle } from '@differ/server'
+import { startServer, loadConfig, type EditorType, type DiffStyle } from '@diffy/server'
 
 const { values, positionals } = parseArgs({
   args: Bun.argv.slice(2),
@@ -20,10 +20,10 @@ const { values, positionals } = parseArgs({
 
 if (values.help) {
   console.log(`
-differ - Git diff viewer
+diffy - Git diff viewer
 
 Usage:
-  differ [directory] [options]
+  diffy [directory] [options]
 
 Arguments:
   directory     Path to git repository (default: current directory)
@@ -36,9 +36,9 @@ Options:
   -h, --help             Show this help message
 
 Config:
-  Create .differrc.json in your repo or ~/.config/differ/config.json globally.
+  Create .diffyrc.json in your repo or ~/.config/diffy/config.json globally.
 
-  Example .differrc.json:
+  Example .diffyrc.json:
   {
     "editor": "zed",
     "diffStyle": "unified",
@@ -47,11 +47,11 @@ Config:
   }
 
 Examples:
-  differ                    # View diffs in current directory
-  differ /path/to/repo      # View diffs in specific repo
-  differ -p 3000            # Use specific port
-  differ -e zed             # Use Zed as default editor
-  differ --no-open          # Don't open browser
+  diffy                    # View diffs in current directory
+  diffy /path/to/repo      # View diffs in specific repo
+  diffy -p 3000            # Use specific port
+  diffy -e zed             # Use Zed as default editor
+  diffy --no-open          # Don't open browser
 `)
   process.exit(0)
 }
@@ -116,7 +116,7 @@ const server = startServer({
 
 const url = `http://localhost:${server.port}`
 
-console.log(`\n  Differ is running!\n`)
+console.log(`\n  Diffy is running!\n`)
 console.log(`  Repository: ${repoPath}`)
 console.log(`  URL:        ${url}`)
 if (config.editor !== 'vscode') {

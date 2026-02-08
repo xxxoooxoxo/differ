@@ -31,60 +31,183 @@ interface VimNavigationState {
   isActive: boolean
 }
 
+const injectedShadowRoots = new WeakSet<ShadowRoot>()
+
+function injectFocusStyles(shadowRoot: ShadowRoot) {
+  if (injectedShadowRoots.has(shadowRoot)) return
+
+  const style = document.createElement('style')
+  style.textContent = `
+[data-line] {
+  transition: background 0.15s ease;
+}
+[data-separator] {
+  transition: background 0.15s ease;
+}
+[data-line].line-focused::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(59, 130, 246, 0.15);
+  border-left: 3px solid rgb(59, 130, 246);
+  pointer-events: none;
+  z-index: 1;
+}
+[data-line].line-focused:hover::after {
+  background: rgba(59, 130, 246, 0.15);
+}
+[data-line-type="change-addition"].line-focused::after,
+[data-line-type="change-addition"].line-focused:hover::after {
+  background: rgba(34, 197, 94, 0.2);
+  border-left-color: rgb(34, 197, 94);
+}
+[data-line-type="change-deletion"].line-focused::after,
+[data-line-type="change-deletion"].line-focused:hover::after {
+  background: rgba(239, 68, 68, 0.2);
+  border-left-color: rgb(239, 68, 68);
+}
+[data-separator="line-info"].hunk-focused,
+[data-separator="line-info"].hunk-focused:hover {
+  background: rgba(251, 191, 36, 0.2) !important;
+  box-shadow: inset 4px 0 0 rgb(251, 191, 36) !important;
+}
+`
+  shadowRoot.appendChild(style)
+  injectedShadowRoots.add(shadowRoot)
+}
+
 /**
  * Get the shadow root of the diffs-container element for a file.
  * @pierre/diffs uses Web Components with Shadow DOM, so we need to access
  * the shadow root to query diff lines and hunks.
  */
 function getDiffsShadowRoot(filePath: string): ShadowRoot | null {
-  const container = document.getElementById(`diff-${CSS.escape(filePath)}`)
+  // getElementById takes a plain string, NOT a CSS selector - don't use CSS.escape
+  const container = document.getElementById(`diff-${filePath}`)
   if (!container) return null
 
   const diffsContainer = container.querySelector('diffs-container')
-  if (!diffsContainer || !diffsContainer.shadowRoot) return null
+  if (!diffsContainer?.shadowRoot) return null
 
-  return diffsContainer.shadowRoot
+  const shadowRoot = diffsContainer.shadowRoot
+  injectFocusStyles(shadowRoot)
+  return shadowRoot
 }
 
 /**
  * Get hunk header elements for a file.
- * Tries multiple selectors to be compatible with different @pierre/diffs versions.
+ * In split mode, deduplicates by data-expand-index since each logical hunk
+ * has two separator elements (one per column). Returns the first column's
+ * elements for navigation/scrolling purposes.
  */
 function getHunkElements(filePath: string): HTMLElement[] {
   const shadowRoot = getDiffsShadowRoot(filePath)
   if (!shadowRoot) return []
 
-  // Try the data-separator attribute first (standard @pierre/diffs)
-  let hunks = shadowRoot.querySelectorAll('[data-separator="line-info"]')
-  if (hunks.length > 0) {
-    return Array.from(hunks) as HTMLElement[]
+  const allSeparators = shadowRoot.querySelectorAll('[data-separator="line-info"]')
+  const hunks = Array.from(allSeparators) as HTMLElement[]
+
+  // In split mode, there are duplicate separators (one per column).
+  // Deduplicate by data-expand-index, keeping only the first occurrence.
+  const isSplitMode = shadowRoot.querySelector('[data-type="split"]') !== null
+  if (isSplitMode) {
+    const seen = new Set<string>()
+    return hunks.filter((el) => {
+      const expandIndex = el.getAttribute('data-expand-index')
+      if (expandIndex !== null && seen.has(expandIndex)) return false
+      if (expandIndex !== null) seen.add(expandIndex)
+      return true
+    })
   }
 
-  // Fallback: look for elements containing @@ hunk header pattern
-  const candidates = shadowRoot.querySelectorAll('div, span, td')
-  const hunkElements: HTMLElement[] = []
-  candidates.forEach((el) => {
-    const text = el.textContent?.trim() || ''
-    // Match @@ -x,y +x,y @@ pattern and ensure it's a leaf-ish node
-    if (/^@@\s*-\d+/.test(text) && el.children.length <= 2) {
-      hunkElements.push(el as HTMLElement)
-    }
-  })
-
-  return hunkElements
+  return hunks
 }
 
 /**
  * Get all diff lines for a file using [data-line][data-line-type] selector.
- * Queries the Shadow DOM of the diffs-container element.
+ * In split mode, only returns lines from the LEFT column (data-deletions) to
+ * avoid double-counting rows that appear in both columns.
  */
 function getAllDiffLines(filePath: string): HTMLElement[] {
   const shadowRoot = getDiffsShadowRoot(filePath)
   if (!shadowRoot) return []
 
-  // Get all elements with data-line attribute that also have a data-line-type
+  const isSplitMode = shadowRoot.querySelector('[data-type="split"]') !== null
+  if (isSplitMode) {
+    // Only query the left column to get one line per visual row
+    const leftCol = shadowRoot.querySelector('code[data-deletions]')
+    if (leftCol) {
+      return Array.from(leftCol.querySelectorAll('[data-line][data-line-type]')) as HTMLElement[]
+    }
+  }
+
   const lines = shadowRoot.querySelectorAll('[data-line][data-line-type]')
   return Array.from(lines) as HTMLElement[]
+}
+
+/**
+ * Parse the split row index from a data-line-index attribute (format: "unifiedIdx,splitIdx").
+ */
+function getSplitIndex(el: HTMLElement): string | null {
+  const idx = el.getAttribute('data-line-index')
+  if (!idx) return null
+  const comma = idx.lastIndexOf(',')
+  return comma >= 0 ? idx.slice(comma + 1) : null
+}
+
+/**
+ * In split mode, find the matching line in the RIGHT column at the same visual row.
+ * Matches by comparing parsed split row indices from data-line-index.
+ */
+function getMatchingRightLine(filePath: string, leftLine: HTMLElement): HTMLElement | null {
+  const splitIdx = getSplitIndex(leftLine)
+  if (splitIdx === null) return null
+
+  const shadowRoot = getDiffsShadowRoot(filePath)
+  if (!shadowRoot) return null
+
+  const rightCol = shadowRoot.querySelector('code[data-additions]')
+  if (!rightCol) return null
+
+  const rightLines = rightCol.querySelectorAll('[data-line][data-line-type]')
+  for (const rl of rightLines) {
+    if (getSplitIndex(rl as HTMLElement) === splitIdx) {
+      return rl as HTMLElement
+    }
+  }
+  return null
+}
+
+function waitForDiffReady(filePath: string, callback: () => void, maxWait = 300) {
+  let elapsed = 0
+  const check = () => {
+    const lines = getAllDiffLines(filePath)
+    if (lines.length > 0) {
+      callback()
+      return
+    }
+    elapsed += 16
+    if (elapsed < maxWait) {
+      requestAnimationFrame(check)
+    }
+  }
+  requestAnimationFrame(check)
+}
+
+function waitForHunksReady(filePath: string, callback: () => void, maxWait = 300) {
+  let elapsed = 0
+  const check = () => {
+    const hunks = getHunkElements(filePath)
+    if (hunks.length > 0) {
+      callback()
+      return
+    }
+    elapsed += 16
+    if (elapsed < maxWait) {
+      requestAnimationFrame(check)
+    }
+  }
+  requestAnimationFrame(check)
 }
 
 /**
@@ -157,31 +280,60 @@ function getFirstLineIndexOfHunk(
 }
 
 /**
+ * Check if an element is visible within its scroll container with margin.
+ */
+function isElementInView(
+  element: HTMLElement,
+  container: HTMLElement,
+  margin = 80
+): boolean {
+  const elemRect = element.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  return (
+    elemRect.top >= containerRect.top + margin &&
+    elemRect.bottom <= containerRect.bottom - margin
+  )
+}
+
+/**
  * Scroll an element into view within a scroll container.
- * Uses direct scroll calculation for reliability.
+ * Scrolls minimally — just enough to bring the element into view with margin.
  */
 function scrollElementIntoView(
   element: HTMLElement,
-  scrollContainer: HTMLElement | null
+  scrollContainer: HTMLElement | null,
+  behavior: ScrollBehavior = 'smooth'
 ) {
   if (!scrollContainer) {
-    // Fallback: use native scrollIntoView
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    element.scrollIntoView({ behavior, block: 'nearest' })
     return
   }
+
+  // Skip if already visible with margin
+  if (isElementInView(element, scrollContainer)) return
 
   const elementRect = element.getBoundingClientRect()
   const containerRect = scrollContainer.getBoundingClientRect()
 
-  // Calculate scroll position to center the element
-  const elementOffsetTop =
-    elementRect.top - containerRect.top + scrollContainer.scrollTop
-  const centeredScrollTop =
-    elementOffsetTop - containerRect.height / 2 + elementRect.height / 2
+  // Scroll minimally: just enough to bring into view with margin
+  let scrollTop = scrollContainer.scrollTop
+  const margin = 80
+
+  if (elementRect.top < containerRect.top + margin) {
+    // Element is above visible area - scroll up
+    scrollTop =
+      scrollContainer.scrollTop + (elementRect.top - containerRect.top) - margin
+  } else if (elementRect.bottom > containerRect.bottom - margin) {
+    // Element is below visible area - scroll down
+    scrollTop =
+      scrollContainer.scrollTop +
+      (elementRect.bottom - containerRect.bottom) +
+      margin
+  }
 
   scrollContainer.scrollTo({
-    top: Math.max(0, centeredScrollTop),
-    behavior: 'smooth',
+    top: Math.max(0, scrollTop),
+    behavior,
   })
 }
 
@@ -190,7 +342,7 @@ function scrollElementIntoView(
  */
 function scrollToFile(filePath: string, scrollContainer: HTMLElement | null) {
   requestAnimationFrame(() => {
-    const fileElement = document.getElementById(`diff-${CSS.escape(filePath)}`)
+    const fileElement = document.getElementById(`diff-${filePath}`)
     if (fileElement) {
       scrollElementIntoView(fileElement, scrollContainer)
     }
@@ -209,13 +361,43 @@ function scrollToHunk(
     const hunks = getHunkElements(filePath)
     const hunk = hunks[hunkIndex]
     if (hunk) {
-      scrollElementIntoView(hunk, scrollContainer)
+      scrollElementIntoView(hunk, scrollContainer, 'smooth')
     }
   })
 }
 
 /**
- * Scroll a line into view
+ * Scroll an element to the center of its scroll container.
+ * Clamps to top/bottom so it doesn't over-scroll at boundaries.
+ */
+function scrollElementToCenter(
+  element: HTMLElement,
+  scrollContainer: HTMLElement | null,
+  behavior: ScrollBehavior = 'instant'
+) {
+  if (!scrollContainer) {
+    element.scrollIntoView({ behavior, block: 'center' })
+    return
+  }
+
+  const elementRect = element.getBoundingClientRect()
+  const containerRect = scrollContainer.getBoundingClientRect()
+
+  // Calculate scroll position that centers the element
+  const elementCenter = elementRect.top + elementRect.height / 2
+  const containerCenter = containerRect.top + containerRect.height / 2
+  const offset = elementCenter - containerCenter
+  const targetScroll = scrollContainer.scrollTop + offset
+
+  // Clamp to valid range (handles top/bottom boundaries naturally)
+  const maxScroll = scrollContainer.scrollHeight - scrollContainer.clientHeight
+  const clampedScroll = Math.max(0, Math.min(targetScroll, maxScroll))
+
+  scrollContainer.scrollTo({ top: clampedScroll, behavior })
+}
+
+/**
+ * Scroll a line to center of viewport (instant to avoid lag when holding j/k)
  */
 function scrollToLine(
   filePath: string,
@@ -226,7 +408,7 @@ function scrollToLine(
     const lines = getAllDiffLines(filePath)
     const line = lines[lineIndex]
     if (line) {
-      scrollElementIntoView(line, scrollContainer)
+      scrollElementToCenter(line, scrollContainer, 'instant')
     }
   })
 }
@@ -248,15 +430,23 @@ function clearClassFromAllShadowRoots(className: string) {
 }
 
 /**
- * Apply line focus styling
+ * Apply line focus styling to a line and its split-mode counterpart
  */
-function applyLineFocus(element: HTMLElement | null) {
+function applyLineFocus(element: HTMLElement | null, filePath?: string) {
   // Clear all existing line focus from shadow DOMs
   clearClassFromAllShadowRoots('line-focused')
 
   // Apply new focus
   if (element) {
     element.classList.add('line-focused')
+
+    // In split mode, also highlight the matching right-column line
+    if (filePath) {
+      const rightLine = getMatchingRightLine(filePath, element)
+      if (rightLine) {
+        rightLine.classList.add('line-focused')
+      }
+    }
   }
 }
 
@@ -316,15 +506,27 @@ export function useVimNavigation({
     // Clear all hunk highlights from shadow DOMs
     clearClassFromAllShadowRoots('hunk-focused')
 
-    // Apply new hunk highlight
+    // Apply new hunk highlight to ALL matching separators (both columns in split mode)
     if (
       focusedIndex !== null &&
       focusedHunkIndex !== null &&
       focusedIndex < files.length
     ) {
       const file = files[focusedIndex]
-      const hunks = getHunkElements(file.path)
-      hunks[focusedHunkIndex]?.classList.add('hunk-focused')
+      const shadowRoot = getDiffsShadowRoot(file.path)
+      if (shadowRoot) {
+        const hunks = getHunkElements(file.path)
+        const focusedHunk = hunks[focusedHunkIndex]
+        if (focusedHunk) {
+          const expandIndex = focusedHunk.getAttribute('data-expand-index')
+          // Highlight ALL separators with this expand-index (both columns)
+          shadowRoot.querySelectorAll('[data-separator="line-info"]').forEach((el) => {
+            if (expandIndex === null || el.getAttribute('data-expand-index') === expandIndex) {
+              el.classList.add('hunk-focused')
+            }
+          })
+        }
+      }
     }
   }, [focusedIndex, focusedHunkIndex, files])
 
@@ -337,7 +539,7 @@ export function useVimNavigation({
     ) {
       const file = files[focusedIndex]
       const lines = getAllDiffLines(file.path)
-      applyLineFocus(lines[focusedLineIndex] || null)
+      applyLineFocus(lines[focusedLineIndex] || null, file.path)
     } else {
       applyLineFocus(null)
     }
@@ -388,20 +590,15 @@ export function useVimNavigation({
       }
 
       // Wait for DOM to render, then focus first line
-      setTimeout(() => {
+      waitForDiffReady(file.path, () => {
         const lines = getAllDiffLines(file.path)
         if (lines.length > 0) {
           setFocusedLineIndex(0)
-          // Update hunk index based on line position
           const hunkIdx = getHunkIndexForLine(lines[0], file.path)
           setFocusedHunkIndex(hunkIdx)
           scrollToLine(file.path, 0, scrollContainerRef.current)
-        } else {
-          // No lines (empty file), just focus the file
-          setFocusedLineIndex(null)
-          setFocusedHunkIndex(null)
         }
-      }, 50)
+      })
     },
     [files, diffListRef, scrollContainerRef]
   )
@@ -423,20 +620,16 @@ export function useVimNavigation({
       }
 
       // Wait for DOM to render, then focus last line
-      setTimeout(() => {
+      waitForDiffReady(file.path, () => {
         const lines = getAllDiffLines(file.path)
         if (lines.length > 0) {
           const lastIdx = lines.length - 1
           setFocusedLineIndex(lastIdx)
-          // Update hunk index based on line position
           const hunkIdx = getHunkIndexForLine(lines[lastIdx], file.path)
           setFocusedHunkIndex(hunkIdx)
           scrollToLine(file.path, lastIdx, scrollContainerRef.current)
-        } else {
-          setFocusedLineIndex(null)
-          setFocusedHunkIndex(null)
         }
-      }, 50)
+      })
     },
     [files, diffListRef, scrollContainerRef]
   )
@@ -462,9 +655,97 @@ export function useVimNavigation({
         lastKeyRef.current = null
       }
 
-      // Auto-activate on first navigation key if not active
-      if (!isActive && (key === 'j' || key === 'k' || key === '{' || key === '}')) {
-        activate()
+      // Keys that work OUTSIDE vim mode: J/K (scroll files), Ctrl-D/U, v (activate)
+      const isCtrlD = key === 'd' && (e.ctrlKey || e.metaKey)
+      const isCtrlU = key === 'u' && (e.ctrlKey || e.metaKey)
+      const outsideKeys = key === 'J' || key === 'K' || key === 'v' || isCtrlD || isCtrlU
+      if (!isActive && !outsideKeys) {
+        return
+      }
+
+      // Handle Ctrl-D / Ctrl-U (half-page jump) - works in and out of vim mode
+      if (isCtrlD || isCtrlU) {
+        e.preventDefault()
+        const container = scrollContainerRef.current
+
+        // If not in vim mode or no focus, just scroll the viewport
+        if (!isActive || focusedIndex === null || !container) {
+          if (container) {
+            const dir = isCtrlD ? 1 : -1
+            container.scrollBy({ top: dir * container.clientHeight / 2, behavior: 'smooth' })
+          }
+          return
+        }
+
+        const file = files[focusedIndex]
+        const lines = getAllDiffLines(file.path)
+        if (lines.length === 0) return
+
+        // Estimate half-page as ~container height / line height
+        const sampleLine = lines[0]
+        const lineHeight = sampleLine?.getBoundingClientRect().height || 20
+        const halfPage = Math.max(1, Math.floor(container.clientHeight / 2 / lineHeight))
+
+        const currentLine = focusedLineIndex ?? 0
+        if (isCtrlD) {
+          const targetLine = Math.min(currentLine + halfPage, lines.length - 1)
+          if (targetLine >= lines.length - 1 && focusedIndex < files.length - 1) {
+            // Past end of file → jump to next file
+            navigateToFileWithFirstLine(focusedIndex + 1)
+          } else {
+            setFocusedLineIndex(targetLine)
+            const hunkIdx = getHunkIndexForLine(lines[targetLine], file.path)
+            setFocusedHunkIndex(hunkIdx)
+            scrollToLine(file.path, targetLine, container)
+          }
+        } else {
+          const targetLine = Math.max(currentLine - halfPage, 0)
+          if (targetLine <= 0 && focusedIndex > 0) {
+            // Past start of file → jump to prev file
+            navigateToFileWithLastLine(focusedIndex - 1)
+          } else {
+            setFocusedLineIndex(targetLine)
+            const hunkIdx = getHunkIndexForLine(lines[targetLine], file.path)
+            setFocusedHunkIndex(hunkIdx)
+            scrollToLine(file.path, targetLine, container)
+          }
+        }
+        return
+      }
+
+      // J/K outside vim mode: scroll next/prev file into center view
+      if (!isActive && (key === 'J' || key === 'K')) {
+        e.preventDefault()
+        const container = scrollContainerRef.current
+        if (!container || files.length === 0) return
+
+        // Find which file is currently most centered in view
+        const containerRect = container.getBoundingClientRect()
+        const containerCenter = containerRect.top + containerRect.height / 2
+        let closestIdx = 0
+        let closestDist = Infinity
+        for (let i = 0; i < files.length; i++) {
+          const el = document.getElementById(`diff-${files[i].path}`)
+          if (el) {
+            const rect = el.getBoundingClientRect()
+            const dist = Math.abs(rect.top + rect.height / 2 - containerCenter)
+            if (dist < closestDist) {
+              closestDist = dist
+              closestIdx = i
+            }
+          }
+        }
+
+        const targetIdx = key === 'J'
+          ? Math.min(closestIdx + 1, files.length - 1)
+          : Math.max(closestIdx - 1, 0)
+        const targetEl = document.getElementById(`diff-${files[targetIdx].path}`)
+        if (targetEl) {
+          const targetRect = targetEl.getBoundingClientRect()
+          const scrollOffset = targetRect.top - containerRect.top - (containerRect.height / 2) + (targetRect.height / 2)
+          container.scrollBy({ top: scrollOffset, behavior: 'smooth' })
+        }
+        return
       }
 
       switch (key) {
@@ -482,7 +763,7 @@ export function useVimNavigation({
           if (!expanded) {
             // File collapsed → expand and focus first line
             diffListRef.current?.toggleFile(file.path, true)
-            setTimeout(() => {
+            waitForDiffReady(file.path, () => {
               const lines = getAllDiffLines(file.path)
               if (lines.length > 0) {
                 setFocusedLineIndex(0)
@@ -490,7 +771,7 @@ export function useVimNavigation({
                 setFocusedHunkIndex(hunkIdx)
                 scrollToLine(file.path, 0, scrollContainerRef.current)
               }
-            }, 50)
+            })
             return
           }
 
@@ -576,12 +857,11 @@ export function useVimNavigation({
 
           const file = files[focusedIndex]
           const expanded = diffListRef.current?.isExpanded(file.path)
-
           if (!expanded) {
             diffListRef.current?.toggleFile(file.path, true)
           }
 
-          setTimeout(() => {
+          waitForDiffReady(file.path, () => {
             const hunks = getHunkElements(file.path)
             if (hunks.length === 0) {
               // No hunks → prev file's last hunk
@@ -594,7 +874,7 @@ export function useVimNavigation({
                   diffListRef.current?.toggleFile(prevFile.path, true)
                 }
 
-                setTimeout(() => {
+                waitForHunksReady(prevFile.path, () => {
                   const prevHunks = getHunkElements(prevFile.path)
                   if (prevHunks.length > 0) {
                     const lastHunkIdx = prevHunks.length - 1
@@ -603,7 +883,7 @@ export function useVimNavigation({
                     setFocusedLineIndex(lineIdx)
                     scrollToHunk(prevFile.path, lastHunkIdx, scrollContainerRef.current)
                   }
-                }, 50)
+                })
               }
               return
             }
@@ -627,7 +907,7 @@ export function useVimNavigation({
                   diffListRef.current?.toggleFile(prevFile.path, true)
                 }
 
-                setTimeout(() => {
+                waitForHunksReady(prevFile.path, () => {
                   const prevHunks = getHunkElements(prevFile.path)
                   if (prevHunks.length > 0) {
                     const lastHunkIdx = prevHunks.length - 1
@@ -636,10 +916,10 @@ export function useVimNavigation({
                     setFocusedLineIndex(lineIdx)
                     scrollToHunk(prevFile.path, lastHunkIdx, scrollContainerRef.current)
                   }
-                }, 50)
+                })
               }
             }
-          }, expanded ? 0 : 50)
+          })
           break
         }
 
@@ -652,12 +932,11 @@ export function useVimNavigation({
 
           const file = files[focusedIndex]
           const expanded = diffListRef.current?.isExpanded(file.path)
-
           if (!expanded) {
             diffListRef.current?.toggleFile(file.path, true)
           }
 
-          setTimeout(() => {
+          waitForDiffReady(file.path, () => {
             const hunks = getHunkElements(file.path)
             if (hunks.length === 0) {
               // No hunks → next file's first hunk
@@ -670,7 +949,7 @@ export function useVimNavigation({
                   diffListRef.current?.toggleFile(nextFile.path, true)
                 }
 
-                setTimeout(() => {
+                waitForHunksReady(nextFile.path, () => {
                   const nextHunks = getHunkElements(nextFile.path)
                   if (nextHunks.length > 0) {
                     setFocusedHunkIndex(0)
@@ -678,7 +957,7 @@ export function useVimNavigation({
                     setFocusedLineIndex(lineIdx)
                     scrollToHunk(nextFile.path, 0, scrollContainerRef.current)
                   }
-                }, 50)
+                })
               }
               return
             }
@@ -702,7 +981,7 @@ export function useVimNavigation({
                   diffListRef.current?.toggleFile(nextFile.path, true)
                 }
 
-                setTimeout(() => {
+                waitForHunksReady(nextFile.path, () => {
                   const nextHunks = getHunkElements(nextFile.path)
                   if (nextHunks.length > 0) {
                     setFocusedHunkIndex(0)
@@ -710,10 +989,10 @@ export function useVimNavigation({
                     setFocusedLineIndex(lineIdx)
                     scrollToHunk(nextFile.path, 0, scrollContainerRef.current)
                   }
-                }, 50)
+                })
               }
             }
-          }, expanded ? 0 : 50)
+          })
           break
         }
 
@@ -772,8 +1051,7 @@ export function useVimNavigation({
             const file = files[focusedIndex]
             if (!diffListRef.current?.isExpanded(file.path)) {
               diffListRef.current?.toggleFile(file.path, true)
-              // Wait for DOM to render, then focus first line
-              setTimeout(() => {
+              waitForDiffReady(file.path, () => {
                 const lines = getAllDiffLines(file.path)
                 if (lines.length > 0) {
                   setFocusedLineIndex(0)
@@ -781,7 +1059,7 @@ export function useVimNavigation({
                   setFocusedHunkIndex(hunkIdx)
                   scrollToLine(file.path, 0, scrollContainerRef.current)
                 }
-              }, 50)
+              })
             }
           }
           break
@@ -797,7 +1075,7 @@ export function useVimNavigation({
 
             if (willExpand) {
               // Expanding → focus first line
-              setTimeout(() => {
+              waitForDiffReady(file.path, () => {
                 const lines = getAllDiffLines(file.path)
                 if (lines.length > 0) {
                   setFocusedLineIndex(0)
@@ -805,7 +1083,7 @@ export function useVimNavigation({
                   setFocusedHunkIndex(hunkIdx)
                   scrollToLine(file.path, 0, scrollContainerRef.current)
                 }
-              }, 50)
+              })
             } else {
               // Collapsing → exit line/hunk mode
               setFocusedHunkIndex(null)
@@ -857,6 +1135,14 @@ export function useVimNavigation({
             openInEditor
           ) {
             openInEditor(files[focusedIndex].path)
+          }
+          break
+        }
+
+        case 'v': {
+          e.preventDefault()
+          if (!isActive) {
+            activate()
           }
           break
         }

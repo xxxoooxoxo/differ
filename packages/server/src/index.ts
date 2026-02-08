@@ -79,7 +79,7 @@ export function createServer(serverConfig: ServerConfig) {
       if (!rawHtml) {
         return c.text('Not found', 404)
       }
-      const configScript = `<script>window.__DIFFER__=${JSON.stringify({ config: differConfig, repoPath: state.repoPath })}</script>`
+      const configScript = `<script>window.__DIFFY__=${JSON.stringify({ config: differConfig, repoPath: state.repoPath })}</script>`
       const html = rawHtml.replace('</head>', `${configScript}</head>`)
       return c.html(html)
     }

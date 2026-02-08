@@ -8,6 +8,7 @@ import { useTabs } from '../contexts/TabContext'
 import { HeaderContent, type DiffStyle } from '../components/Header'
 import { AppSidebar, SidebarProvider, SidebarInset, SidebarTrigger } from '../components/AppSidebar'
 import { VirtualizedDiffList, type VirtualizedDiffListHandle } from '../components/VirtualizedDiffList'
+import { FileMinimap } from '../components/FileMinimap'
 import { Separator } from '../components/ui/separator'
 import { ArrowLeft } from 'lucide-react'
 
@@ -44,7 +45,7 @@ export function CommitView() {
         setDiffStyle(activeTab.viewState.diffStyle)
       }
 
-      requestAnimationFrame(() => {
+      queueMicrotask(() => {
         isTabSwitchingRef.current = false
       })
     }
@@ -63,7 +64,7 @@ export function CommitView() {
   const commit = data?.commit
   const files = data?.files || []
 
-  const { focusedIndex } = useVimNavigation({
+  const { focusedIndex, isActive: isVimActive } = useVimNavigation({
     files,
     diffListRef,
     scrollContainerRef: contentRef,
@@ -155,12 +156,20 @@ export function CommitView() {
                   diffStyle={diffStyle}
                   scrollContainerRef={contentRef}
                   focusedIndex={focusedIndex}
+                  isVimActive={isVimActive}
                 />
               </>
             ) : null}
           </div>
         </main>
       </SidebarInset>
+      {!loading && files.length > 0 && (
+        <FileMinimap
+          files={files}
+          onSelectFile={handleSelectFile}
+          selectedFile={selectedFile}
+        />
+      )}
     </SidebarProvider>
   )
 }

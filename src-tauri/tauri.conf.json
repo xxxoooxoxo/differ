@@ -1,18 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Differ",
+  "productName": "Diffy",
   "version": "0.1.0",
-  "identifier": "com.differ.app",
+  "identifier": "com.diffy.app",
   "build": {
     "frontendDist": "../packages/web/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "bun run --filter @differ/web dev",
-    "beforeBuildCommand": "bun run --filter @differ/web build"
+    "beforeDevCommand": "bun run --filter @diffy/web dev",
+    "beforeBuildCommand": "bun run --filter @diffy/web build"
   },
   "app": {
     "windows": [
       {
-        "title": "Differ",
+        "title": "Diffy",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
