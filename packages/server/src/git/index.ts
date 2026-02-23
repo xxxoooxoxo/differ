@@ -45,6 +45,12 @@ export function createGitClient(repoPath: string): SimpleGit {
   return simpleGit(repoPath)
 }
 
+function getFileStatusFromPatch(patch: string): 'added' | 'deleted' | 'modified' {
+  if (patch.includes('new file mode')) return 'added'
+  if (patch.includes('deleted file mode')) return 'deleted'
+  return 'modified'
+}
+
 function getFileStats(file: { binary?: boolean; insertions?: number; deletions?: number }): { additions: number; deletions: number } {
   if (file.binary) {
     return { additions: 0, deletions: 0 }
@@ -133,6 +139,10 @@ export async function getCurrentDiff(git: SimpleGit): Promise<DiffResult> {
     if (error || content === null) continue
 
     const lines = content.split('\n')
+    // Remove trailing empty string from files ending with a newline
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop()
+    }
     const lineCount = lines.length
     const isLarge = content.length > MAX_PATCH_SIZE
 
@@ -275,9 +285,7 @@ export async function getCommitDiff(git: SimpleGit, sha: string): Promise<{ comm
     totalAdditions += additions
     totalDeletions += deletions
 
-    // Determine status from diff summary flags
-    const fileAny = file as any
-    const status = fileAny.deleted ? 'deleted' : fileAny.insertion ? 'added' : 'modified'
+    const status = getFileStatusFromPatch(patch)
 
     files.push({
       path: file.file,
@@ -365,9 +373,7 @@ export async function compareBranches(
     totalAdditions += additions
     totalDeletions += deletions
 
-    // Determine status from diff summary flags
-    const fileAny = file as any
-    const status = fileAny.deleted ? 'deleted' : fileAny.insertion ? 'added' : 'modified'
+    const status = getFileStatusFromPatch(patch)
 
     files.push({
       path: file.file,
@@ -1048,8 +1054,7 @@ export async function getPRDiff(
     const isLarge = rawPatch.length > MAX_PATCH_SIZE
     const patch = isLarge ? '' : rawPatch
 
-    const fileAny = file as any
-    const status = fileAny.deleted ? 'deleted' : fileAny.insertion ? 'added' : 'modified'
+    const status = getFileStatusFromPatch(rawPatch)
 
     files.push({
       path: file.file,
